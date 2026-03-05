@@ -1,0 +1,7 @@
+.DS_Store
+__pycache__/
+*.egg-info/
+*.pyc
+examples/signal-bot/.env
+examples/trader-bot/.env
+examples/data/

@@ -4,7 +4,7 @@ description: MCP-first workflow for connecting signal bots to the AGDEL predicti
 license: Apache-2.0
 metadata:
   author: Pyrana
-  version: 1.1.0
+  version: 1.2.0
   mcp-server: agdel-mcp
   documentation: https://agent-deliberation.net/docs/maker-guide
 ---
@@ -42,6 +42,10 @@ If the agdel-mcp server is not yet connected, help the user add it to their Clau
 - `AGDEL_SIGNER_PRIVATE_KEY` — the maker's EVM wallet private key (used for signing authenticated requests and deriving the maker address)
 - `MARKETPLACE_ADDRESS` — the AGDEL marketplace contract address. Required for generating the `listing_signature` that the API verifies.
 
+**For standalone bots** (not running inside Claude Code), the bot connects to the MCP server as a subprocess. The bot must pass all three env vars to the subprocess environment. See the reference implementation in `examples/signal-bot/src/signal_bot/agdel.py` for an example of how to do this.
+
+**Local development with unpublished agdel-mcp:** If the npm-published `agdel-mcp` is out of date, point bots at a local build by setting `AGDEL_MCP_PATH` to the path of the built `dist/server.js` (e.g. `/path/to/agdel/packages/agdel-mcp/dist/server.js`). The bot should check this env var and use `node <path>` instead of `npx agdel-mcp` when set.
+
 ## Important
 
 - Consult `references/mcp-tools-reference.md` for full MCP tool signatures and usage patterns.
@@ -54,6 +58,8 @@ If the agdel-mcp server is not yet connected, help the user add it to their Clau
 - All amount and price fields are **integer strings**, NOT decimals. `cost_usdc` is micro-USDC (6 decimals): `$0.50` = `"500000"`. `target_price` and `entry_price` are scaled by 1e8: `$2500.50` = `"250050000000"`. Sending `"0.50"` or `"2500.50"` will fail with "amount values must be positive integer strings".
 - **Hex format**: All hex values (`commitment_hash`, `salt`, signatures) must be `0x`-prefixed. Use `"0x" + value.hex()` in Python — bare `.hex()` omits the `0x` prefix.
 - **Address casing**: Always **lowercase** Ethereum addresses (`address.lower()`). The API and commitment hash computation use lowercased addresses. Using EIP-55 checksummed (mixed-case) addresses will cause commitment hash mismatches.
+- **Listing signature**: The MCP server generates the `listing_signature` automatically. The bot must NOT compute or pass its own signature — doing so will cause `invalid listing_signature` errors. The MCP server uses EIP-191 `signMessage` over an inner hash that includes `MARKETPLACE_ADDRESS`, `CHAIN_ID`, maker address, asset, expiry, cost, commitment hash, and a random listing salt. The API recovers the signer and verifies it matches the authenticated maker.
+- **Entry price**: The API fetches `entry_price` server-side from Hyperliquid. Bots do not need to pass `entry_price` in the listing request (it will be ignored if sent).
 
 ## Step 1: Verify MCP Connection
 
@@ -109,7 +115,7 @@ def prepare_signal(private_key, asset, target_price, direction, duration_seconds
     maker = acct.address.lower()
 
     # Scale target_price by 1e8 (integer, not float)
-    target_price_scaled = int(target_price * 1e8)
+    target_price_scaled = int(round(target_price * 1e8))
     direction_int = 0 if direction.lower() == "long" else 1
 
     # Commitment hash: keccak256(maker, asset, targetPrice, direction, expiryTime, salt)
@@ -131,13 +137,13 @@ def prepare_signal(private_key, asset, target_price, direction, duration_seconds
     }
 ```
 
-NOTE: The MCP server generates the `listing_signature` internally using `signListing()` — it combines the listing fields with `MARKETPLACE_ADDRESS` and `CHAIN_ID` into an EIP-191 signature. The bot does NOT need to compute or pass any signature.
+NOTE: The MCP server generates the `listing_signature` internally — it builds an inner hash from the listing fields combined with `MARKETPLACE_ADDRESS` and `CHAIN_ID`, then signs it with `ethers.signMessage` (EIP-191). The bot does NOT need to compute or pass any signature.
 
 CRITICAL: The bot must **persist the salt and signal parameters** to disk (JSON file or database). If the salt is lost, the signal cannot be revealed and defaults to a loss.
 
 ## Step 4: Create a Listing via MCP
 
-Once the bot computes a commitment hash and signature, create the marketplace listing:
+Once the bot computes a commitment hash, create the marketplace listing:
 
 Call MCP tool: `agdel_market_create_listing`
 Parameters:
@@ -149,17 +155,14 @@ Parameters:
 - `signal_name` — short display name (optional)
 - `signal_description` — thesis description (optional)
 - `confidence` — 0.0-1.0 (optional, but recommended)
-- `entry_price` — current price as **integer string scaled by 1e8**. `$2500.50` = `"250050000000"`. NOT a decimal string like `"2500.50"`.
-- `maker_address` — maker's wallet address (**lowercased**). Required for signature verification.
 - `horizon_bucket` — time bucket e.g. "1h", "4h" (optional)
-- `webhook_url` — URL to receive a POST notification when a buyer purchases this signal (optional but recommended for instant purchase detection)
+- `webhook_url` — URL to receive a POST notification when a buyer purchases this signal (optional but recommended for instant purchase detection — see Step 7)
+
+Do NOT pass `maker_address`, `maker_signature`, `entry_price`, or `listing_signature` — the MCP server and API handle these automatically.
 
 CRITICAL: All amount and price fields must be **positive integer strings**. The API rejects decimal strings like `"0.14"` or `"2500.50"`. Convert before sending:
 - `cost_usdc`: `str(int(round(cost_float * 1e6)))`
-- `entry_price`: `str(int(round(price_float * 1e8)))`
 - `target_price` (for reveal): `str(int(round(price_float * 1e8)))`
-
-If `maker_address` is omitted, `AGDEL_ACTOR_ADDRESS` from the MCP config is used.
 
 Verify the response confirms the listing was created. The response will include the commitment_hash as the canonical identifier.
 
@@ -168,9 +171,9 @@ Verify the response confirms the listing was created. The response will include 
 Help the user create a bridge script that connects their signal bot output to the MCP listing workflow. The bridge should:
 
 1. **Listen** for new signals from the bot (file watcher, queue, or callback)
-2. **Compute** commitment hash and signature (Step 3 logic)
+2. **Compute** commitment hash (Step 3 logic)
 3. **Persist** salt and signal params to disk
-4. **Call** the AGDEL API to create the listing (or invoke MCP tool) — include `webhook_url` pointing to the bot's HTTP endpoint
+4. **Call** the AGDEL API to create the listing (or invoke MCP tool) — include `webhook_url` if webhook delivery is configured
 5. **Detect purchases** — receive instant webhook POSTs or fall back to polling `pending-deliveries`
 6. **Encrypt and deliver** payloads to buyers
 7. **Reveal** after expiry
@@ -244,11 +247,34 @@ There are two ways to detect purchases:
 ```
 Your bot should run an HTTP server at the webhook URL and trigger the encrypt-and-deliver flow on receipt. This eliminates polling latency entirely.
 
-**Webhook URL must be publicly reachable.** The AGDEL server sends the POST from the internet, so `localhost` URLs will not work. If your bot runs on a server with a public IP/domain, use that directly (e.g. `https://mybot.example.com/webhook`). If running locally during development, use a tunnel service like [ngrok](https://ngrok.com) to expose your local port:
-```bash
-ngrok http 8080          # exposes localhost:8080 as https://<id>.ngrok-free.app
+**Setting up the webhook server:**
+
+The webhook URL must be publicly reachable — the AGDEL server sends POSTs from the internet. Common approaches:
+
+| Setup | Example URL | Notes |
+|-------|-------------|-------|
+| Public server / VPS | `https://mybot.example.com/webhook` | Best for production. No extra tooling needed. |
+| ngrok tunnel | `https://abc123.ngrok-free.app/webhook` | Good for local dev. Run `ngrok http <port>`. URL changes on restart (unless you have a paid plan with reserved domains). |
+| Cloudflare Tunnel | `https://mybot.trycloudflare.com/webhook` | Free alternative to ngrok. Run `cloudflared tunnel --url http://localhost:<port>`. |
+| Tailscale Funnel | `https://myhost.tail1234.ts.net/webhook` | If already using Tailscale. |
+
+The bot needs a minimal HTTP server listening on the configured port. A lightweight asyncio implementation works well — see `examples/signal-bot/src/signal_bot/webhook.py` for a reference. Key endpoints:
+- `POST /webhook` — receives purchase events, triggers delivery
+- `GET /health` — optional health check
+
+**Configuration pattern for the bot:**
 ```
-Then pass the ngrok URL as `webhook_url` when creating listings. Remember to update it if the tunnel restarts.
+# .env
+SIGNALBOT_WEBHOOK_BASE_URL=https://your-public-url-here   # omit to use polling
+SIGNALBOT_WEBHOOK_PORT=8080                                 # local listen port
+```
+
+The bot should:
+1. Check if `SIGNALBOT_WEBHOOK_BASE_URL` is set
+2. If set: start the HTTP server on `SIGNALBOT_WEBHOOK_PORT` and pass `{base_url}/webhook` as `webhook_url` when creating listings
+3. If not set: fall back to polling (Option B) — no webhook server started
+
+This keeps webhook support fully optional. Users who can't expose a public endpoint simply omit the env var.
 
 **Option B: Polling (fallback)** — Poll `agdel_exchange_list_pending_deliveries` to discover purchases awaiting delivery. This adds latency and is only recommended if you cannot expose a public HTTP endpoint.
 
@@ -289,11 +315,23 @@ Parameters:
 - `direction` — 0 for LONG, 1 for SHORT (as number)
 - `salt` — `0x`-prefixed hex-encoded salt from Step 3
 
-If `maker_address` is omitted, `AGDEL_ACTOR_ADDRESS` is used.
-
 The API recomputes the commitment hash from these values and verifies it matches. All parameters must **exactly** match the values used to compute the original commitment hash — same address casing (lowercase), same price scaling, same salt bytes. After reveal, the keeper auto-settles and auto-processes refunds.
 
 CRITICAL: If the salt was lost, the signal CANNOT be revealed and will default to a loss.
+
+**Reveal polling frequency:** The reveal loop should check every 5 seconds for expired signals. A 30-second interval is too slow — it risks missing the reveal window on short-horizon signals. Example:
+```python
+async def reveal_loop():
+    """Check for expired signals and reveal them."""
+    while True:
+        pending = load_pending()
+        now = int(time.time())
+        for item in pending:
+            if item["expiry_time"] < now:
+                reveal_signal(item)
+                remove_pending(item["commitment_hash"])
+        await asyncio.sleep(5)
+```
 
 ## Step 9: Track Reputation
 
@@ -321,26 +359,54 @@ Explain scoring to the user. Refer to `references/signal-scoring.md` for details
 Help the user set up a persistent process that runs the full maker lifecycle:
 
 1. **Signal production** — bot generates predictions
-2. **Listing creation** — compute commitment hash, persist salt, create listing via API (include `webhook_url`)
+2. **Listing creation** — compute commitment hash, persist salt, create listing via API
 3. **Purchase detection** — receive webhook POSTs (or fall back to polling `pending-deliveries`)
 4. **Encrypted delivery** — encrypt and deliver payload to buyer
-5. **Reveal** — after expiry, reveal the original prediction
+5. **Reveal** — after expiry, reveal the original prediction (poll every 5 seconds)
 6. **Monitoring** — track reputation and adjust strategy
 
-For custom bots, the bridge from Step 5 handles steps 2-5. Set up a cron or background process for the reveal loop:
+**Concurrent architecture:** The bot must run signal generation, delivery, and reveal as **concurrent async tasks** (e.g. `asyncio.gather`), NOT sequentially in one loop. A sequential loop that generates signals every 60s means delivery polling and reveals also only run every 60s — far too slow. The correct pattern:
 ```python
-async def reveal_loop():
-    """Check for expired signals and reveal them."""
-    while True:
-        pending = load_pending()
-        now = int(time.time())
-        for item in pending:
-            if item["expiry_time"] < now:
-                # Call AGDEL API to reveal
-                reveal_signal(item)
-                remove_pending(item["commitment_hash"])
-        await asyncio.sleep(30)
+await asyncio.gather(
+    signal_loop(),          # generate + publish (every 60s)
+    webhook_delivery_loop(),# drain webhook queue (instant)
+    poll_delivery_loop(),   # fallback polling (every 10s)
+    reveal_loop(),          # reveal expired signals (every 5s)
+)
 ```
+See `examples/signal-bot/src/signal_bot/main.py` for the full implementation.
+
+**Webhook delivery queue:** When using webhooks, the webhook HTTP handler should enqueue purchases into an `asyncio.Queue`, NOT process them inline. A dedicated delivery task drains the queue. This decouples the HTTP response from the potentially slow encrypt-and-deliver flow.
+
+**Multiple bots sharing one tunnel:** When running multiple maker bots on the same machine behind one tunnel (e.g. ngrok), use a lightweight reverse proxy that routes by path. Each bot registers a unique webhook path (e.g. `/webhook` for one, `/api/webhook/purchase` for another). The proxy listens on the tunnel port and forwards to the correct bot. See `examples/signal-bot/proxy.py` for a reference implementation.
+
+**Dry-run mode:** Bots should support a `--dry-run` flag that exercises the full pipeline (signal generation, commitment hash computation, salt persistence, reveal timing) without making actual API calls. This is essential for verifying the lifecycle works before going live. In dry-run mode:
+- Signal generation and commitment hash computation should run normally
+- Pending reveals should be tracked in the store (so reveal timing can be verified)
+- API calls (create listing, deliver, reveal) should be logged but skipped
+- Log messages should clearly indicate dry-run (e.g. `[publish-dry]`, `[reveal-dry]`) — never mix dry-run and live log prefixes
+
+**Graceful shutdown:** The bot's main loop should handle `KeyboardInterrupt` cleanly. Wrap `asyncio.run()` in a try/except at the top level:
+```python
+try:
+    asyncio.run(run(cfg))
+except KeyboardInterrupt:
+    print("\n[bot] Stopped.", flush=True)
+```
+This prevents the asyncio `CancelledError` traceback that otherwise appears when the user presses Ctrl+C during `asyncio.sleep`.
+
+## Reference Implementation
+
+The `examples/signal-bot/` directory contains a complete working signal bot. It demonstrates:
+- Concurrent task architecture with `asyncio.gather` (`main.py`)
+- MCP subprocess management (`agdel.py`) with support for local or npm-published `agdel-mcp`
+- Commitment hash computation and salt persistence (`crypto.py`)
+- Optional webhook server for instant purchase detection (`webhook.py`)
+- Webhook delivery queue pattern for decoupled processing (`main.py`)
+- Publish, deliver, and reveal lifecycle (`publisher.py`)
+- Reverse proxy for sharing one tunnel between multiple bots (`proxy.py`)
+- Dry-run mode with realistic logging
+- Graceful shutdown on Ctrl+C
 
 ## Troubleshooting
 
@@ -358,10 +424,20 @@ async def reveal_loop():
 | Symptom | Fix |
 |---------|-----|
 | Listing creation fails | Verify commitment_hash is `0x`-prefixed and unique. Check that expiry_time is in the future. |
-| `listing_signature` verification fails | The MCP server generates this automatically using `MARKETPLACE_ADDRESS` and `CHAIN_ID`. Ensure both env vars are set correctly in the MCP server environment. The bot does NOT need to compute any signature. |
+| `invalid listing_signature` | **Most common cause:** The bot is running an outdated version of `agdel-mcp` from npm. Check `npm view agdel-mcp version` vs the local package version. If the npm version is behind, either publish the latest or set `AGDEL_MCP_PATH` to the local build. Other causes: `MARKETPLACE_ADDRESS` not set in MCP env, or `CHAIN_ID` mismatch. The bot must NOT pass its own `maker_signature` or `listing_signature` — the MCP server generates these. |
+| `listing_signature does not match maker` | The signer key in the MCP server doesn't match the authenticated request signer. Ensure the same `AGDEL_SIGNER_PRIVATE_KEY` is used. |
 | Reveal fails with hash mismatch | Parameters must exactly match the original computation. Common causes: (1) address not lowercased, (2) missing `0x` prefix on salt or commitment_hash, (3) target_price not scaled by 1e8, (4) wrong direction int value. |
-| Signal defaulted | Reveal was too late (past 30 minutes after expiry). Keep reveal loop running continuously. |
+| Signal defaulted | Reveal was too late (past 30 minutes after expiry). Keep reveal loop running at 5-second intervals. |
 | Low buyer count | Normal for new makers. Quality scores build reputation over time. |
+| Stale reveals from dry run | If you ran in dry-run mode before going live, the pending store may have entries that were never actually published. These will show `not found, removing` on the first live run — this is harmless self-cleanup. |
+
+### Webhook Issues
+
+| Symptom | Fix |
+|---------|-----|
+| Webhook server fails to bind port | Another process is using the port. Check with `lsof -i :<port>`. The MCP health server uses port 8080/8081 — use a different port or kill the stale process. |
+| Webhook not receiving events | Verify the URL is publicly reachable. Test with `curl -X POST <webhook_url>`. If using a tunnel, make sure it's still running and pointing at the correct local port. |
+| Webhook configured but no instant delivery | Confirm `webhook_url` is being passed in the `create_listing` call. Check bot logs for `[webhook] Received purchase` messages. |
 
 ### Wallet/Gas Issues
 

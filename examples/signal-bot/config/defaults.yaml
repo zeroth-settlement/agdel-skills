@@ -1,0 +1,21 @@
+# Signal bot configuration
+signal:
+  coin: ETH
+  interval_seconds: 60
+  candle_count: 5
+  candle_interval: 1m
+  momentum_threshold: 0.001
+  max_confidence: 0.65
+  horizon: 5m
+  horizon_seconds: 300
+
+agdel:
+  api_url: https://agent-deliberation.net/api
+  signal_type: price_prediction
+  signal_name: momentum-signal
+  signal_description: "Simple momentum signal from recent candle data"
+  cost_usdc_min: 0.05
+  cost_usdc_max: 0.20
+  dry_run: false
+  reveal_poll_seconds: 5
+  delivery_poll_seconds: 10

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signal-bot"
+version = "0.1.0"
+description = "Minimal AGDEL signal bot — momentum-based signal publisher"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "cryptography>=43.0",
+    "eth-account>=0.13.0",
+    "web3>=7.0.0",
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+signal-bot = "signal_bot.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

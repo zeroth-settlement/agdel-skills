@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AGDEL Trader Bot</title>
+  <style>
+    :root {
+      --bg-primary: #0d1117; --bg-secondary: #161b22; --bg-card: #1c2128;
+      --bg-hover: #21262d; --border: #30363d; --text-primary: #e6edf3;
+      --text-secondary: #8b949e; --text-muted: #6e7681;
+      --green: #3fb950; --green-dim: #1a4d2e; --red: #f85149; --red-dim: #4d1a1a;
+      --yellow: #d29922; --blue: #58a6ff; --purple: #bc8cff;
+      --font-mono: 'SF Mono', 'Fira Code', monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: var(--font-sans); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; }
+
+    .header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-title { font-size: 15px; font-weight: 600; }
+    .header-asset { font-family: var(--font-mono); color: var(--blue); font-weight: 600; }
+    .badge { display: inline-flex; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .badge-paper { background: var(--yellow); color: #000; }
+    .badge-live { background: var(--red); color: #fff; }
+    .badge-connected { background: var(--green-dim); color: var(--green); }
+    .badge-disconnected { background: var(--red-dim); color: var(--red); }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .mode-btn { padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text-primary); cursor: pointer; font-size: 12px; }
+
+    .market-strip { display: flex; align-items: center; gap: 24px; padding: 8px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; }
+    .price-main { font-size: 20px; font-weight: 700; }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 16px; }
+    .grid-full { grid-column: 1 / -1; }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .card-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+    .stat-row { display: flex; justify-content: space-between; padding: 2px 0; font-family: var(--font-mono); font-size: 12px; }
+    .stat-label { color: var(--text-secondary); }
+    .pnl-positive { color: var(--green); }
+    .pnl-negative { color: var(--red); }
+
+    .position-side { font-size: 18px; font-weight: 700; text-transform: uppercase; }
+    .position-side.long { color: var(--green); }
+    .position-side.short { color: var(--red); }
+    .position-side.flat { color: var(--text-muted); }
+
+    .signal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .signal-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+    .signal-state { font-size: 13px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 4px; }
+    .state-STRONG_LONG { color: var(--green); }
+    .state-LEAN_LONG { color: #85e89d; }
+    .state-FLAT { color: var(--text-muted); }
+    .state-LEAN_SHORT { color: #f97583; }
+    .state-STRONG_SHORT { color: var(--red); }
+    .state-NONE { color: var(--text-muted); }
+
+    /* Approval panel — the key human intervention UI */
+    .approval-panel { background: var(--bg-secondary); border: 2px solid var(--yellow); border-radius: 8px; padding: 16px; margin-bottom: 8px; }
+    .approval-panel.no-action { border-color: var(--border); opacity: 0.7; }
+    .approval-action { font-size: 20px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 8px; }
+    .approval-buttons { display: flex; gap: 12px; margin-top: 12px; }
+    .btn-approve { padding: 8px 24px; border: 2px solid var(--green); border-radius: 6px; background: var(--green-dim); color: var(--green); font-size: 14px; font-weight: 700; cursor: pointer; }
+    .btn-approve:hover { background: var(--green); color: #000; }
+    .btn-reject { padding: 8px 24px; border: 2px solid var(--red); border-radius: 6px; background: var(--red-dim); color: var(--red); font-size: 14px; font-weight: 700; cursor: pointer; }
+    .btn-reject:hover { background: var(--red); color: #fff; }
+    .btn-approve:disabled, .btn-reject:disabled { opacity: 0.4; cursor: default; }
+
+    .data-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
+    .data-table th { text-align: left; padding: 6px 8px; color: var(--text-secondary); font-weight: 600; border-bottom: 1px solid var(--border); font-size: 10px; text-transform: uppercase; }
+    .data-table td { padding: 5px 8px; border-bottom: 1px solid var(--bg-hover); }
+    .data-table tr:hover td { background: var(--bg-hover); }
+
+    .buy-btn { padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); color: var(--blue); cursor: pointer; font-family: var(--font-mono); font-size: 10px; font-weight: 600; }
+    .buy-btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--blue); }
+    .budget-bar { height: 6px; border-radius: 3px; background: var(--bg-secondary); margin: 4px 0; }
+    .budget-fill { height: 100%; border-radius: 3px; background: var(--blue); transition: width 0.3s; }
+
+    .scroll-table { overflow-y: auto; max-height: 320px; }
+
+    @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } .signal-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <span class="header-title">AGDEL Trader Bot</span>
+    <span class="header-asset" id="asset">ETH</span>
+    <span class="badge" id="mode-badge">PAPER</span>
+  </div>
+  <div class="header-right">
+    <button class="mode-btn" onclick="toggleMode()">Switch to Live</button>
+    <span class="badge" id="ws-status">--</span>
+  </div>
+</div>
+
+<div class="market-strip">
+  <span class="price-main" id="mark-price">$0.00</span>
+  <span style="color: var(--text-secondary)">Mode: <span id="mode-label">Paper</span></span>
+</div>
+
+<div class="grid">
+
+  <!-- APPROVE / REJECT — the human intervention panel -->
+  <div class="card grid-full">
+    <div class="card-header">Trade Recommendation</div>
+    <div class="approval-panel no-action" id="approval-panel">
+      <div class="approval-action" id="approval-action">NO PENDING ACTION</div>
+      <div class="stat-row"><span class="stat-label">Fast Signal</span><span id="approval-fast">--</span></div>
+      <div class="stat-row"><span class="stat-label">Slow Signal</span><span id="approval-slow">--</span></div>
+      <div class="stat-row"><span class="stat-label">Reason</span><span id="approval-reason">--</span></div>
+      <div class="approval-buttons">
+        <button class="btn-approve" id="btn-approve" onclick="approveTrade()" disabled>APPROVE</button>
+        <button class="btn-reject" id="btn-reject" onclick="rejectTrade()" disabled>REJECT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Position -->
+  <div class="card">
+    <div class="card-header">Position</div>
+    <div class="position-side flat" id="pos-side-display">FLAT</div>
+    <div class="stat-row"><span class="stat-label">Size</span><span id="pos-size">0</span></div>
+    <div class="stat-row"><span class="stat-label">Entry</span><span id="pos-entry">--</span></div>
+    <div class="stat-row"><span class="stat-label">uPnL</span><span id="pos-pnl">$0.00</span></div>
+    <div class="stat-row"><span class="stat-label">Equity</span><span id="equity">$0.00</span></div>
+    <div class="stat-row"><span class="stat-label">Net PnL</span><span id="net-pnl">$0.00</span></div>
+  </div>
+
+  <!-- AGDEL Status -->
+  <div class="card">
+    <div class="card-header">AGDEL Marketplace</div>
+    <div class="stat-row"><span class="stat-label">Buyer</span><span id="wallet-addr" style="font-size:11px;font-family:var(--font-mono)">--</span></div>
+    <div class="stat-row"><span class="stat-label">USDC</span><span id="wallet-usdc">$0.00</span></div>
+    <div class="stat-row"><span class="stat-label">Purchased</span><span id="agdel-count">0</span></div>
+    <div class="stat-row"><span class="stat-label">Last Poll</span><span id="agdel-poll">--</span></div>
+    <div style="margin-top:8px">
+      <div style="font-size:10px;color:var(--text-secondary)">Hourly Budget</div>
+      <div class="budget-bar"><div class="budget-fill" id="budget-hourly" style="width:0%"></div></div>
+      <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">Daily Budget</div>
+      <div class="budget-bar"><div class="budget-fill" id="budget-daily" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <!-- Signals -->
+  <div class="card grid-full">
+    <div class="card-header">Signals</div>
+    <div class="signal-grid">
+      <div class="signal-card">
+        <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">FAST (5m)</div>
+        <div class="signal-state state-NONE" id="fast-signal-state">NO SIGNAL</div>
+        <div class="stat-row"><span class="stat-label">Score</span><span id="fast-score">--</span></div>
+        <div class="stat-row"><span class="stat-label">Confidence</span><span id="fast-conf">--</span></div>
+        <div class="stat-row"><span class="stat-label">Direction</span><span id="fast-dir">--</span></div>
+      </div>
+      <div class="signal-card">
+        <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">SLOW (15m)</div>
+        <div class="signal-state state-NONE" id="slow-signal-state">NO SIGNAL</div>
+        <div class="stat-row"><span class="stat-label">Score</span><span id="slow-score">--</span></div>
+        <div class="stat-row"><span class="stat-label">Confidence</span><span id="slow-conf">--</span></div>
+        <div class="stat-row"><span class="stat-label">Direction</span><span id="slow-dir">--</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Available Signals -->
+  <div class="card grid-full">
+    <div class="card-header">Available Signals <span id="avail-count" style="font-size:11px;color:var(--text-secondary)">0</span></div>
+    <div class="scroll-table">
+      <table class="data-table">
+        <thead><tr><th>ID</th><th>Hz</th><th>Maker</th><th>Cost</th><th>Conf</th><th>Quality</th><th>Win Rate</th><th></th></tr></thead>
+        <tbody id="avail-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Trade History -->
+  <div class="card grid-full">
+    <div class="card-header">Trade History</div>
+    <table class="data-table">
+      <thead><tr><th>Time</th><th>Action</th><th>Size</th><th>Price</th><th>PnL</th></tr></thead>
+      <tbody id="trades-body"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+let ws = null, state = {}, reconnectDelay = 1000;
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onopen = () => { reconnectDelay = 1000; document.getElementById('ws-status').textContent = 'Connected'; document.getElementById('ws-status').className = 'badge badge-connected'; };
+  ws.onmessage = (e) => { try { state = JSON.parse(e.data); if (state.timestamp) updateDashboard(state); } catch(err) {} };
+  ws.onclose = () => { document.getElementById('ws-status').textContent = 'Disconnected'; document.getElementById('ws-status').className = 'badge badge-disconnected'; setTimeout(connectWS, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); };
+  ws.onerror = () => ws.close();
+}
+
+function updateDashboard(d) {
+  const mode = d.tradingMode || 'paper';
+  document.getElementById('mode-badge').textContent = mode.toUpperCase();
+  document.getElementById('mode-badge').className = 'badge ' + (mode === 'live' ? 'badge-live' : 'badge-paper');
+  document.getElementById('mode-label').textContent = mode === 'live' ? 'Live' : 'Paper';
+  document.getElementById('asset').textContent = d.asset || 'ETH';
+  document.getElementById('mark-price').textContent = '$' + (d.markPrice || 0).toFixed(2);
+
+  // Position
+  const pos = d.position || {};
+  const side = pos.side || 'flat';
+  const sideEl = document.getElementById('pos-side-display');
+  sideEl.textContent = side.toUpperCase();
+  sideEl.className = 'position-side ' + side;
+  document.getElementById('pos-size').textContent = pos.size ? Math.abs(pos.size).toFixed(4) : '0';
+  document.getElementById('pos-entry').textContent = pos.entryPrice ? '$' + pos.entryPrice.toFixed(2) : '--';
+  setPnl('pos-pnl', pos.unrealizedPnl || 0);
+  const pf = d.portfolio || {};
+  document.getElementById('equity').textContent = '$' + (pf.equity || 0).toFixed(2);
+  setPnl('net-pnl', pf.pnl || 0);
+
+  // Approval panel
+  const pa = d.pendingApproval;
+  const panel = document.getElementById('approval-panel');
+  const actionEl = document.getElementById('approval-action');
+  if (pa) {
+    panel.className = 'approval-panel';
+    actionEl.textContent = pa.action.toUpperCase().replace(/_/g, ' ');
+    actionEl.style.color = actionColor(pa.action);
+    document.getElementById('approval-fast').textContent = pa.fast_state || '--';
+    document.getElementById('approval-slow').textContent = pa.slow_state || '--';
+    document.getElementById('approval-reason').textContent = pa.reason || '--';
+    document.getElementById('btn-approve').disabled = false;
+    document.getElementById('btn-reject').disabled = false;
+  } else {
+    panel.className = 'approval-panel no-action';
+    actionEl.textContent = 'NO PENDING ACTION';
+    actionEl.style.color = 'var(--text-muted)';
+    document.getElementById('approval-fast').textContent = '--';
+    document.getElementById('approval-slow').textContent = '--';
+    document.getElementById('approval-reason').textContent = '--';
+    document.getElementById('btn-approve').disabled = true;
+    document.getElementById('btn-reject').disabled = true;
+  }
+
+  // Signals
+  updateSignal('fast', d.signals?.fast);
+  updateSignal('slow', d.signals?.slow);
+
+  // AGDEL
+  const w = d.wallet || {};
+  document.getElementById('wallet-addr').textContent = w.addressShort || '--';
+  document.getElementById('wallet-usdc').textContent = '$' + (w.usdcBalance || 0).toFixed(4);
+  const ag = d.agdel || {};
+  document.getElementById('agdel-count').textContent = ag.purchasedCount || 0;
+  document.getElementById('agdel-poll').textContent = ag.lastPollAt ? timeAgo(ag.lastPollAt) : '--';
+  const budget = ag.budget || {};
+  setBudgetBar('budget-hourly', budget.hourlySpend, budget.hourlyLimit);
+  setBudgetBar('budget-daily', budget.dailySpend, budget.dailyLimit);
+
+  // Available signals
+  renderAvailable(d.availableSignals || []);
+
+  // Trades
+  renderTrades(d);
+}
+
+function updateSignal(prefix, sig) {
+  if (!sig || !sig.active) {
+    document.getElementById(prefix + '-signal-state').textContent = 'NO SIGNAL';
+    document.getElementById(prefix + '-signal-state').className = 'signal-state state-NONE';
+    document.getElementById(prefix + '-score').textContent = '--';
+    document.getElementById(prefix + '-conf').textContent = '--';
+    document.getElementById(prefix + '-dir').textContent = '--';
+    return;
+  }
+  document.getElementById(prefix + '-signal-state').textContent = sig.state;
+  document.getElementById(prefix + '-signal-state').className = 'signal-state state-' + sig.state;
+  document.getElementById(prefix + '-score').textContent = sig.score.toFixed(4);
+  document.getElementById(prefix + '-conf').textContent = sig.confidence.toFixed(4);
+  document.getElementById(prefix + '-dir').textContent = sig.direction || '--';
+}
+
+function renderAvailable(signals) {
+  const body = document.getElementById('avail-body');
+  document.getElementById('avail-count').textContent = signals.length + ' signals';
+  body.innerHTML = signals.slice(0, 20).map(s => `<tr>
+    <td style="font-size:10px;color:var(--blue)">${s.commitmentHashShort || '--'}</td>
+    <td>${s.horizon || '--'}</td>
+    <td>${s.maker || '--'}</td>
+    <td>$${(s.cost || 0).toFixed(2)}</td>
+    <td>${(s.confidence || 0).toFixed(2)}</td>
+    <td>${(s.quality || 0).toFixed(2)}</td>
+    <td>${((s.winRate || 0) * 100).toFixed(0)}%</td>
+    <td><button class="buy-btn" onclick="buySignal('${s.commitmentHash}', this)">BUY</button></td>
+  </tr>`).join('');
+}
+
+function renderTrades(d) {
+  // Fetch trades from history if available
+  fetch('/api/trades').then(r => r.json()).then(trades => {
+    const body = document.getElementById('trades-body');
+    body.innerHTML = trades.slice(0, 20).map(t => `<tr>
+      <td>${new Date(t.timestamp * 1000).toLocaleTimeString()}</td>
+      <td style="color:${actionColor(t.action)}">${t.action}</td>
+      <td>${(t.size || 0).toFixed(4)}</td>
+      <td>$${(t.price || 0).toFixed(2)}</td>
+      <td class="${t.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">$${(t.pnl || 0).toFixed(4)}</td>
+    </tr>`).join('');
+  }).catch(() => {});
+}
+
+function setPnl(id, val) {
+  const el = document.getElementById(id);
+  el.textContent = '$' + (val || 0).toFixed(4);
+  el.className = val >= 0 ? 'pnl-positive' : 'pnl-negative';
+}
+
+function setBudgetBar(id, spend, limit) {
+  const el = document.getElementById(id);
+  const pct = limit > 0 ? Math.min((spend || 0) / limit * 100, 100) : 0;
+  el.style.width = pct + '%';
+  el.className = 'budget-fill' + (pct > 80 ? ' danger' : pct > 50 ? ' warn' : '');
+}
+
+function actionColor(action) {
+  if (!action) return 'var(--text-muted)';
+  if (action.includes('long') || action === 'increase') return 'var(--green)';
+  if (action.includes('short')) return 'var(--red)';
+  if (action === 'close') return 'var(--yellow)';
+  return 'var(--text-muted)';
+}
+
+function timeAgo(ts) {
+  const s = Math.floor(Date.now() / 1000 - ts);
+  if (s < 60) return s + 's ago';
+  return Math.floor(s / 60) + 'm ago';
+}
+
+async function approveTrade() {
+  document.getElementById('btn-approve').disabled = true;
+  document.getElementById('btn-reject').disabled = true;
+  try {
+    const r = await fetch('/api/approve', { method: 'POST' });
+    const data = await r.json();
+    if (!data.ok) alert('Approve failed: ' + (data.error || 'unknown'));
+  } catch(e) { alert('Error: ' + e); }
+}
+
+async function rejectTrade() {
+  document.getElementById('btn-approve').disabled = true;
+  document.getElementById('btn-reject').disabled = true;
+  try { await fetch('/api/reject', { method: 'POST' }); } catch(e) {}
+}
+
+async function toggleMode() {
+  const current = state.tradingMode || 'paper';
+  const next = current === 'paper' ? 'live' : 'paper';
+  if (next === 'live' && !confirm('Switch to LIVE mode? Real orders will be placed!')) return;
+  await fetch('/api/config/mode', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mode: next}) });
+}
+
+async function buySignal(hash, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const r = await fetch('/api/agdel/buy', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({commitment_hash: hash}) });
+    const data = await r.json();
+    if (data.ok) { btn.textContent = 'OK'; btn.style.color = 'var(--green)'; }
+    else { btn.textContent = 'FAIL'; btn.style.color = 'var(--red)'; btn.title = data.error; }
+  } catch(e) { btn.textContent = 'ERR'; btn.style.color = 'var(--red)'; }
+}
+
+connectWS();
+</script>
+</body>
+</html>

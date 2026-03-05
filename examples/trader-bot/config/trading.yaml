@@ -1,0 +1,54 @@
+trading:
+  enable: false        # true = live trading, false = paper mode
+  assets:
+  - ETH
+  riskPerTrade: 0.0075
+  maxLeverage: 15
+  paperStartingBalanceUsd: 1000
+  loopIntervalMs: 5000
+
+matrix:
+  confidentThreshold: 0.3
+  flatThreshold: 0.03
+  maxSizePct: 1.0
+  partialSizePct: 0.5
+  reducePct: 0.5
+  initialSizePct: 0.15
+  increaseStepPct: 0.2
+  increaseCooldownMs: 120000
+  matrixMinHoldMs: 120000
+  matrixFlipCooldownMs: 300000
+  signalHorizons:
+    fast: 5m
+    slow: 15m
+
+agdel:
+  enabled: true
+  autoBuy: false       # manual approval via dashboard
+  pollIntervalSeconds: 30
+  apiUrl: https://agent-deliberation.net/api
+  assets:
+  - ETH
+  budget:
+    maxCostPerSignalUsdc: 2.0
+    maxHourlySpendUsdc: 10.0
+    maxDailySpendUsdc: 50.0
+  makerFilters:
+    minWinRate: 0.3
+    minTotalSignals: 5
+  selection:
+    targetHorizons:
+      5m: 1
+      15m: 1
+    weightReputation: 0.6
+    weightHitRate: 0.6
+    weightConfidence: 0.85
+    weightFreshness: 0.15
+    minSignalConfidence: 0.2
+    minSignalHitRate: 0.2
+    minConfCalib: 0.5
+    fetchLimit: 100
+  exchange:
+    deliveryPollSeconds: 1
+    deliveryTimeoutSeconds: 60
+    keyFilePath: data/buyer_exchange_key.bin
