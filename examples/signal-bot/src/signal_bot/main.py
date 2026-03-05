@@ -20,25 +20,25 @@ from .webhook import WebhookServer, webhook_url_for
 
 async def run(cfg: dict) -> None:
     """Main async loop: generate signals, publish, deliver, reveal."""
-    scfg = cfg.get("signal", {})
-    acfg = cfg.get("agdel", {})
+    signal_cfg = cfg.get("signal", {})
+    agdel_cfg = cfg.get("agdel", {})
 
-    coin = scfg.get("coin", "ETH")
-    interval = scfg.get("interval_seconds", 60)
-    candle_count = scfg.get("candle_count", 5)
-    candle_interval = scfg.get("candle_interval", "1m")
-    momentum_threshold = scfg.get("momentum_threshold", 0.001)
-    max_confidence = scfg.get("max_confidence", 0.65)
-    dry_run = acfg.get("dry_run", False)
-    delivery_poll_seconds = acfg.get("delivery_poll_seconds", 10)
-    reveal_poll_seconds = acfg.get("reveal_poll_seconds", 5)
+    coin = signal_cfg.get("coin", "ETH")
+    interval = signal_cfg.get("interval_seconds", 60)
+    candle_count = signal_cfg.get("candle_count", 5)
+    candle_interval = signal_cfg.get("candle_interval", "1m")
+    momentum_threshold = signal_cfg.get("momentum_threshold", 0.001)
+    max_confidence = signal_cfg.get("max_confidence", 0.65)
+    dry_run = agdel_cfg.get("dry_run", False)
+    delivery_poll_seconds = agdel_cfg.get("delivery_poll_seconds", 10)
+    reveal_poll_seconds = agdel_cfg.get("reveal_poll_seconds", 5)
 
-    wallet_key = acfg.get("wallet_private_key") or os.environ.get("SIGNALBOT_WALLET_PRIVATE_KEY", "")
+    wallet_key = agdel_cfg.get("wallet_private_key") or os.environ.get("SIGNALBOT_WALLET_PRIVATE_KEY", "")
     if not wallet_key:
         print("[error] No wallet key. Set SIGNALBOT_WALLET_PRIVATE_KEY.", flush=True)
         return
 
-    acfg["wallet_private_key"] = wallet_key
+    agdel_cfg["wallet_private_key"] = wallet_key
     account = Account.from_key(wallet_key)
     print(f"[bot] Wallet: {account.address}", flush=True)
     print(f"[bot] Coin: {coin} | Interval: {interval}s | Dry run: {dry_run}", flush=True)
@@ -46,7 +46,7 @@ async def run(cfg: dict) -> None:
     # Connect to AGDEL MCP
     mcp = AgdelMCPClient(
         wallet_private_key=wallet_key,
-        api_url=acfg.get("api_url", "https://agent-deliberation.net/api"),
+        api_url=agdel_cfg.get("api_url", "https://agent-deliberation.net/api"),
     )
 
     try:
@@ -74,8 +74,8 @@ async def run(cfg: dict) -> None:
     delivery_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
 
     # Optional webhook server for instant purchase detection
-    webhook_base_url = acfg.get("webhook_base_url") or os.environ.get("SIGNALBOT_WEBHOOK_BASE_URL", "")
-    webhook_port = int(acfg.get("webhook_port", 0) or os.environ.get("SIGNALBOT_WEBHOOK_PORT", "8090"))
+    webhook_base_url = agdel_cfg.get("webhook_base_url") or os.environ.get("SIGNALBOT_WEBHOOK_BASE_URL", "")
+    webhook_port = int(agdel_cfg.get("webhook_port", 0) or os.environ.get("SIGNALBOT_WEBHOOK_PORT", "8090"))
     webhook_server = None
     webhook_url = None
 

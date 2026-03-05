@@ -35,7 +35,7 @@ class AgdelMCPClient:
         self,
         wallet_private_key: str,
         api_url: str = "https://agent-deliberation.net/api",
-        marketplace_address: str = "0x1779255c0AcDe950095C9E872B2fAD06CFB88D4c",
+        marketplace_address: str = "0x1779255c0AcDe950095C9E872B2fAD06CFB88D4c",  # HyperEVM (chain 999)
     ) -> None:
         self._wallet_private_key = wallet_private_key
         self._api_url = api_url

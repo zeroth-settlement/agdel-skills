@@ -76,6 +76,7 @@ def prepare_signal(
     for listing creation and later reveal.
     """
     salt = secrets.token_bytes(32)
+    # +10s buffer so the signal doesn't expire mid-creation
     expiry_time = int(time.time()) + duration_seconds + 10
     account = Account.from_key(private_key)
     target_price_scaled = scale_price(target_price)
@@ -99,21 +100,6 @@ def prepare_signal(
         "maker": account.address.lower(),
     }
 
-
-def build_maker_signature(account: Any, commitment_hash: str) -> str:
-    """Sign commitment hash with personal_sign for listing creation.
-
-    The AGDEL API verifies: ethers.verifyMessage(`AGDEL-COMMIT:${hash}`, sig)
-    """
-    from eth_account.messages import encode_defunct
-
-    message = f"AGDEL-COMMIT:{commitment_hash}"
-    signable = encode_defunct(text=message)
-    signed = account.sign_message(signable)
-    sig_hex = signed.signature.hex()
-    if not sig_hex.startswith("0x"):
-        sig_hex = f"0x{sig_hex}"
-    return sig_hex
 
 
 def load_or_create_encryption_keypair() -> dict[str, str]:
@@ -141,6 +127,7 @@ def load_or_create_encryption_keypair() -> dict[str, str]:
     _ENCRYPTION_KEY_FILE.write_text(
         json.dumps(key_data, indent=2), encoding="utf-8"
     )
+    os.chmod(_ENCRYPTION_KEY_FILE, 0o600)
     print("[crypto] Generated new encryption keypair", flush=True)
     return key_data
 

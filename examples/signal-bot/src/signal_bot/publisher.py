@@ -1,8 +1,4 @@
-"""AGDEL signal publisher — publish, deliver, and reveal lifecycle.
-
-Simplified from market-fragility-bot: no CxU, no per-horizon cooldowns,
-no webhook delivery queue. Core publish/deliver/reveal loop only.
-"""
+"""AGDEL signal publisher — publish, deliver, and reveal lifecycle."""
 
 from __future__ import annotations
 
@@ -18,9 +14,9 @@ from .crypto import (
     encrypt_for_buyer,
     load_or_create_encryption_keypair,
     prepare_signal,
+    _DATA_DIR,
 )
 
-_DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 _STATE_FILE = _DATA_DIR / "pending_reveals.json"
 
 
@@ -42,12 +38,14 @@ class PendingRevealStore:
                 print(f"[store] Failed to load state: {exc}")
 
     def _save(self) -> None:
+        import os
         tmp = self._state_path.with_suffix(".json.tmp")
         payload = {
             "pending": self._pending,
             "updated_at": int(time.time()),
         }
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        os.chmod(tmp, 0o600)
         tmp.replace(self._state_path)
 
     def add(self, item: dict) -> None:
@@ -106,31 +104,32 @@ async def publish_signal(
 
     Returns True on success, False on failure.
     """
-    acfg = cfg.get("agdel", {})
-    scfg = cfg.get("signal", {})
-    coin = scfg.get("coin", "ETH")
-    horizon = scfg.get("horizon", "5m")
-    horizon_seconds = scfg.get("horizon_seconds", 300)
+    agdel_cfg = cfg.get("agdel", {})
+    signal_cfg = cfg.get("signal", {})
+    coin = signal_cfg.get("coin", "ETH")
+    horizon = signal_cfg.get("horizon", "5m")
+    horizon_seconds = signal_cfg.get("horizon_seconds", 300)
 
     conf = prediction["confidence"]
     cost = confidence_to_cost(
         conf,
-        acfg.get("cost_usdc_min", 0.05),
-        acfg.get("cost_usdc_max", 0.20),
+        agdel_cfg.get("cost_usdc_min", 0.05),
+        agdel_cfg.get("cost_usdc_max", 0.20),
     )
 
     try:
         prepared = prepare_signal(
-            private_key=acfg["wallet_private_key"],
+            private_key=agdel_cfg["wallet_private_key"],
             asset=coin,
             target_price=prediction["target_price"],
             direction=prediction["direction"],
             duration_seconds=horizon_seconds,
         )
 
+        # USDC has 6 decimals: $0.14 = 140000
         cost_usdc_scaled = int(round(cost * 10**6))
 
-        if acfg.get("dry_run"):
+        if agdel_cfg.get("dry_run"):
             print(
                 f"[publish-dry] Would publish {coin} {horizon} "
                 f"dir={prediction['direction']} conf={conf:.3f} cost=${cost:.2f} "
@@ -143,10 +142,10 @@ async def publish_signal(
                 asset=coin,
                 expiry_time=prepared["expiry_time"],
                 cost_usdc=str(cost_usdc_scaled),
-                signal_type=acfg.get("signal_type", "price_prediction"),
+                signal_type=agdel_cfg.get("signal_type", "price_prediction"),
                 maker_address=prepared["maker"],
-                signal_name=acfg.get("signal_name", "momentum-signal"),
-                signal_description=acfg.get("signal_description", ""),
+                signal_name=agdel_cfg.get("signal_name", "momentum-signal"),
+                signal_description=agdel_cfg.get("signal_description", ""),
                 confidence=conf,
                 entry_price=str(int(round(prediction["entry_price"] * 10**8))),
                 horizon_bucket=horizon,
@@ -170,7 +169,7 @@ async def publish_signal(
             "created_at": int(time.time()),
         })
 
-        if not acfg.get("dry_run"):
+        if not agdel_cfg.get("dry_run"):
             print(
                 f"[published] {coin} {horizon} {prediction['direction']} "
                 f"target=${prediction['target_price']:.2f} conf={conf:.3f} "
@@ -261,15 +260,11 @@ async def poll_and_deliver(
         if not purchases:
             continue
 
-        item = store.find_by_commitment_hash(commitment_hash)
-        if not item:
-            continue
-
-        delivered_to = set(item.get("delivered_to", []))
         for purchase in purchases:
             buyer = purchase.get("buyer_address", "")
-            if not buyer or buyer in delivered_to:
+            if not buyer:
                 continue
+            # deliver_to_buyer checks delivered_to internally
             try:
                 await deliver_to_buyer(mcp, store, keypair, commitment_hash, buyer)
             except Exception as exc:

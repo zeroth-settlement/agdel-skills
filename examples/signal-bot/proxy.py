@@ -51,7 +51,13 @@ async def proxy_request(
                 break
             header = line.decode("utf-8", errors="replace").strip().lower()
             if header.startswith("content-length:"):
-                content_length = int(header.split(":", 1)[1].strip())
+                try:
+                    content_length = int(header.split(":", 1)[1].strip())
+                except ValueError:
+                    content_length = 0
+                if content_length > 1_000_000:  # 1MB max
+                    _send_error(writer, 400, '{"error":"payload too large"}')
+                    return
 
         # Read body
         body = b""
@@ -116,7 +122,8 @@ def _send_error(writer: asyncio.StreamWriter, status: int, body: str) -> None:
 
 
 async def _run(port: int) -> None:
-    server = await asyncio.start_server(proxy_request, "0.0.0.0", port)
+    # Bind to localhost — external access comes through the tunnel (ngrok etc.)
+    server = await asyncio.start_server(proxy_request, "127.0.0.1", port)
     print(f"[proxy] Listening on :{port}", flush=True)
     for route_path, backend_port in ROUTES.items():
         print(f"[proxy]   {route_path} -> :{backend_port}", flush=True)

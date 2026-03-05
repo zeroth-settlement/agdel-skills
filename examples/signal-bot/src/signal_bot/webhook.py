@@ -33,8 +33,9 @@ class WebhookServer:
         self._server: asyncio.Server | None = None
 
     async def start(self) -> None:
+        # Bind to localhost — external access comes through the tunnel (ngrok etc.)
         self._server = await asyncio.start_server(
-            self._handle_connection, "0.0.0.0", self._port
+            self._handle_connection, "127.0.0.1", self._port
         )
         print(f"[webhook] Listening on port {self._port}", flush=True)
 
@@ -67,7 +68,13 @@ class WebhookServer:
                     break
                 header = line.decode("utf-8", errors="replace").strip().lower()
                 if header.startswith("content-length:"):
-                    content_length = int(header.split(":", 1)[1].strip())
+                    try:
+                        content_length = int(header.split(":", 1)[1].strip())
+                    except ValueError:
+                        content_length = 0
+                    if content_length > 1_000_000:  # 1MB max
+                        self._send_response(writer, 400, "Payload too large")
+                        return
 
             # Health check
             if method == "GET" and path == "/health":
