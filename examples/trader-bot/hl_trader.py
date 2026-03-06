@@ -384,8 +384,8 @@ class HLTrader:
         portfolio = await self.get_portfolio()
         equity = portfolio["equity"]
         notional = equity * self.risk_per_trade * self.max_leverage * size_pct
-        # Enforce Hyperliquid minimum order value
-        if notional < MIN_ORDER_VALUE_USD:
+        # Enforce Hyperliquid minimum order value (skip for close — no size needed)
+        if action != "close" and notional < MIN_ORDER_VALUE_USD:
             if equity >= MIN_ORDER_VALUE_USD:
                 notional = MIN_ORDER_VALUE_USD
             else:
