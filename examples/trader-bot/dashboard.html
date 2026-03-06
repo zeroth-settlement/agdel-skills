@@ -733,8 +733,8 @@ function renderPurchases(data) {
     const hasError = p.error && !p.delivered;
     const status = p.delivered ? 'Delivered' : p.error ? 'Failed' : 'Pending';
     const outcome = p.outcome || '';
-    const outcomeClass = outcome === 'HIT' ? 'pnl-positive' : outcome === 'MISS' ? 'pnl-negative' : outcome === 'DEFAULT' ? 'pnl-negative' : '';
-    const outcomeLabel = outcome || (status === 'Delivered' ? 'Pending' : '');
+    const outcomeClass = outcome === 'HIT' ? 'pnl-positive' : (outcome === 'MISS' || outcome === 'DEFAULT') ? 'pnl-negative' : '';
+    const outcomeLabel = outcome === 'MISS' ? 'MISS (refunded)' : outcome === 'DEFAULT' ? 'DEFAULT (refunded)' : outcome || (status === 'Delivered' ? 'Pending' : '');
     const cc = p.conf_calib || (p.confidence || 0) * (p.calibration || 0);
     const ccClass = cc >= 0.3 ? 'pnl-positive' : cc >= 0.15 ? '' : 'pnl-negative';
     return `<tr>

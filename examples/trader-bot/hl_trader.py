@@ -419,7 +419,7 @@ class HLTrader:
                     reduce_size = min(size, abs(pos.size) * 0.5)
                     reduce_size = round(reduce_size, self._sz_decimals)
                     is_buy = pos.size < 0  # buy to reduce short, sell to reduce long
-                    result = self._exchange.market_open(self.asset, is_buy, reduce_size, reduce_only=True)
+                    result = self._exchange.market_open(self.asset, is_buy, reduce_size)
                 else:
                     return TradeResult(success=False, action=action, size=0,
                                        price=mark_price, error="No position to reduce")

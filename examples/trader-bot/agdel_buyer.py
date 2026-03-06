@@ -484,6 +484,18 @@ class AgdelBuyer:
     async def _purchase_and_receive(self, candidate: dict) -> dict | None:
         commitment_hash = candidate.get("commitment_hash", "")
         cost = candidate.get("cost", 0)
+        log_base = {
+            "commitment_hash": commitment_hash,
+            "horizon": candidate.get("horizon"),
+            "cost": cost, "purchased_at": time.time(),
+            "maker": (candidate.get("maker", "") or "")[:12],
+            "confidence": candidate.get("confidence", 0),
+            "calibration": candidate.get("calibration", 0),
+            "conf_calib": candidate.get("conf_calib", 0),
+            "signal_type": candidate.get("signal_type", ""),
+            "quality_score": candidate.get("quality_score", 0),
+            "expiry_time": candidate.get("expiry_time", 0),
+        }
         try:
             result = await self._call_tool("agdel_market_purchase_listing", {
                 "commitment_hash": commitment_hash,
@@ -503,31 +515,17 @@ class AgdelBuyer:
                     "candidate": candidate, "purchased_at": time.time(),
                     "maker": candidate.get("maker", ""),
                 }
-                self.purchase_log.appendleft({
-                    "commitment_hash": commitment_hash,
-                    "horizon": candidate.get("horizon"),
-                    "cost": cost, "purchased_at": time.time(), "delivered": False,
-                })
+                self.purchase_log.appendleft({**log_base, "delivered": False})
                 return None
             else:
                 payload = await self._poll_delivery(commitment_hash, candidate.get("maker", ""))
                 if payload:
                     signal = self._convert_signal(payload, candidate)
                     self.signals[candidate["horizon"]] = signal
-                    entry = {
-                        "commitment_hash": commitment_hash,
-                        "horizon": candidate.get("horizon"),
-                        "cost": cost, "purchased_at": time.time(),
-                        "delivered": True,
-                    }
-                    self.purchase_log.appendleft(entry)
+                    self.purchase_log.appendleft({**log_base, "delivered": True})
                     self._update_purchase_log(commitment_hash, payload)
                     return signal
-                self.purchase_log.appendleft({
-                    "commitment_hash": commitment_hash,
-                    "horizon": candidate.get("horizon"),
-                    "cost": cost, "purchased_at": time.time(), "delivered": False,
-                })
+                self.purchase_log.appendleft({**log_base, "delivered": False})
                 return None
         except Exception as e:
             err_str = str(e)
@@ -538,12 +536,7 @@ class AgdelBuyer:
                 return None
             self._stats["errors"] += 1
             logger.error("Purchase failed for %s: %s", commitment_hash[:12], e)
-            self.purchase_log.appendleft({
-                "commitment_hash": commitment_hash,
-                "horizon": candidate.get("horizon"),
-                "cost": cost, "purchased_at": time.time(),
-                "delivered": False, "error": str(e),
-            })
+            self.purchase_log.appendleft({**log_base, "delivered": False, "error": str(e)})
             return None
 
     async def _poll_delivery(self, commitment_hash: str, maker_address: str) -> dict | None:
