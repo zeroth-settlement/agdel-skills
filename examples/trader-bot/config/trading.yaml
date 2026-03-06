@@ -24,7 +24,9 @@ matrix:
 
 agdel:
   enabled: true
-  autoBuy: false       # manual approval via dashboard
+  autoBuy: true
+  autoBuyCooldownSeconds: 180  # min seconds between buys per horizon
+  outlierCcMultiplier: 1.25    # buy signal if C*C > avg × this (1.25 = 25% above)
   pollIntervalSeconds: 30
   apiUrl: https://agent-deliberation.net/api
   assets:

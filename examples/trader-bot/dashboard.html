@@ -119,6 +119,7 @@
     <div class="card-header">
       Available Signals
       <span class="filter-count" id="avail-count">0 signals</span>
+      <button class="mode-btn" id="auto-buy-toggle" onclick="toggleAutoBuy()" style="margin-left:auto;font-size:10px;padding:2px 8px;">Auto Buy: --</button>
     </div>
     <div class="scroll-table" style="max-height: 320px;">
       <table class="data-table">
@@ -264,6 +265,15 @@ function updateDashboard(d) {
   document.getElementById('mode-label').textContent = d.tradingMode === 'live' ? 'Live' : 'Paper';
   document.getElementById('mode-toggle').textContent = d.tradingMode === 'live' ? 'Switch to Paper' : 'Switch to Live';
   document.getElementById('asset').textContent = d.asset || 'ETH';
+
+  // Auto-buy toggle
+  const abBtn = document.getElementById('auto-buy-toggle');
+  if (d.agdel && d.agdel.autoBuy !== undefined) {
+    const on = d.agdel.autoBuy;
+    abBtn.textContent = on ? 'Auto Buy: ON' : 'Auto Buy: OFF';
+    abBtn.style.background = on ? 'var(--green)' : '';
+    abBtn.style.color = on ? '#000' : '';
+  }
 
   // Price
   document.getElementById('mark-price').textContent = '$' + fmtNum(d.markPrice, 2);
@@ -739,7 +749,7 @@ function renderPurchases(data) {
     <td class="${p.direction === 0 || p.direction === '0' || p.direction === 'long' ? 'pnl-positive' : p.direction === 1 || p.direction === '1' || p.direction === 'short' ? 'pnl-negative' : ''}">${p.direction === 0 || p.direction === '0' || p.direction === 'long' ? 'LONG' : p.direction === 1 || p.direction === '1' || p.direction === 'short' ? 'SHORT' : (p.direction || '--')}</td>
     <td>${p.target_price ? '$' + fmtNum(p.target_price, 2) : '--'}</td>
     <td class="${outcomeClass}">${outcomeLabel}</td>
-    <td class="error-cell" ${hasError ? `data-error="${(p.error||'').replace(/"/g,'&quot;')}" onclick="copyError(this)" title="${(p.error||'').replace(/"/g,'&quot;')}"` : ''}>${hasError ? p.error : ''}</td>
+    <td class="error-cell" ${hasError ? `data-error="${(p.error||'').replace(/"/g,'&quot;')}" onclick="copyError(this)" title="${(p.error||'').replace(/"/g,'&quot;')}"` : ''}>${hasError ? `<div class="error-truncate">${p.error}</div>` : ''}</td>
   </tr>`;
   }).join('');
 }
@@ -831,10 +841,11 @@ async function buySignal(commitmentHash, btn) {
 function copyError(el) {
   const err = el.getAttribute('data-error');
   if (!err) return;
-  const original = el.textContent;
+  const inner = el.querySelector('.error-truncate') || el;
+  const original = inner.textContent;
   navigator.clipboard.writeText(err).then(() => {
-    el.textContent = 'Copied!';
-    setTimeout(() => { el.textContent = original; }, 1500);
+    inner.textContent = 'Copied!';
+    setTimeout(() => { inner.textContent = original; }, 1500);
   });
 }
 
@@ -889,6 +900,20 @@ async function rejectTrade() {
 }
 
 // ── Mode toggle ──
+async function toggleAutoBuy() {
+  const btn = document.getElementById('auto-buy-toggle');
+  try {
+    const resp = await fetch('/api/agdel/autobuy', { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+      const on = data.autoBuy;
+      btn.textContent = on ? 'Auto Buy: ON' : 'Auto Buy: OFF';
+      btn.style.background = on ? 'var(--green)' : '';
+      btn.style.color = on ? '#000' : '';
+    }
+  } catch (e) { console.error('Toggle auto-buy failed:', e); }
+}
+
 async function toggleMode() {
   const current = state.tradingMode || 'paper';
   const next = current === 'paper' ? 'live' : 'paper';

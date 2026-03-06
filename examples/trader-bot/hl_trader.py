@@ -160,12 +160,11 @@ class HLTrader:
             equity = float(margin.get("accountValue", 0))
             available = float(margin.get("totalRawUsd", 0))
 
-            # Unified accounts: spot USDC is available for perp trading
-            if equity == 0:
-                spot_usdc = await self._get_spot_usdc()
-                if spot_usdc > 0:
-                    equity = spot_usdc
-                    available = spot_usdc
+            # Unified accounts: spot USDC backs perp trading
+            spot_usdc = await self._get_spot_usdc()
+            if spot_usdc > equity:
+                equity = spot_usdc
+                available = max(available, spot_usdc)
 
             portfolio = {
                 "equity": round(equity, 2),
@@ -243,12 +242,11 @@ class HLTrader:
             equity = float(margin.get("accountValue", 0))
             available = float(margin.get("totalRawUsd", 0))
 
-            # Unified accounts: spot USDC is available for perp trading
-            if equity == 0:
-                spot_usdc = await self._get_spot_usdc()
-                if spot_usdc > 0:
-                    equity = spot_usdc
-                    available = spot_usdc
+            # Unified accounts: spot USDC backs perp trading
+            spot_usdc = await self._get_spot_usdc()
+            if spot_usdc > equity:
+                equity = spot_usdc
+                available = max(available, spot_usdc)
 
             return {
                 "equity": round(equity, 2),

@@ -483,6 +483,15 @@ async def reset_budget():
     return JSONResponse({"ok": True, "budget": agdel_buyer.budget.status()})
 
 
+@app.post("/api/agdel/autobuy")
+async def toggle_autobuy():
+    if not agdel_buyer:
+        return JSONResponse({"ok": False}, status_code=503)
+    agdel_buyer.auto_buy = not agdel_buyer.auto_buy
+    logger.info("Auto-buy toggled: %s", agdel_buyer.auto_buy)
+    return JSONResponse({"ok": True, "autoBuy": agdel_buyer.auto_buy})
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=9004)

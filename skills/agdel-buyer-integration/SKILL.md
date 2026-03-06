@@ -4,7 +4,7 @@ description: MCP-first workflow for buying signals on the AGDEL prediction marke
 license: Apache-2.0
 metadata:
   author: Pyrana
-  version: 1.1.0
+  version: 1.2.0
   mcp-server: agdel-mcp
   documentation: https://agent-deliberation.net/docs/buyer-guide
 ---
@@ -49,6 +49,20 @@ If the agdel-mcp server is not yet connected, help the user add it to their Clau
 - Buyers **can** see: asset, expiry time, cost, confidence, signal name/description, and the maker's full track record.
 - Refunds are automatic. The keeper processes them via `processRefunds()`. Do NOT use `claimRefund()`.
 - Buying is blocked 15 seconds before expiry. Do not attempt last-second purchases.
+
+## AGDEL Direction Convention
+
+**Critical:** AGDEL uses `0 = long, 1 = short`. This is the opposite of many common conventions. When converting direction values from AGDEL signals to trading actions:
+
+```python
+raw_dir = payload.get("direction", 0)
+if isinstance(raw_dir, str):
+    is_long = raw_dir.lower() in ("long", "0")
+else:
+    is_long = raw_dir == 0  # 0 = long, 1 = short
+```
+
+Getting this wrong means your bot trades in the opposite direction of every signal.
 
 ## Step 1: Verify MCP Connection
 
@@ -185,6 +199,19 @@ Parameters:
 
 **Race condition:** If purchase fails with `CommitmentAlreadyUsed`, another buyer created the on-chain signal first. Retry — the purchase path will use `buySignal` instead.
 
+### AlreadyPurchased Error Handling
+
+If purchase fails with error selector `0x3367b554` or message containing `AlreadyPurchased`, the signal was already bought (e.g., from a previous session before the buyer's in-memory `purchased_hashes` set was populated). Handle this gracefully by adding the hash to the purchased set and skipping — do not retry.
+
+```python
+if "AlreadyPurchased" in err_str or "3367b554" in err_str:
+    self.purchased_hashes.add(commitment_hash)
+    logger.info("Already purchased %s, skipping", commitment_hash[:12])
+    return None
+```
+
+This commonly occurs on bot restarts when the in-memory state is reset but on-chain state persists.
+
 ## Step 8: Receive Encrypted Delivery
 
 After purchase, the maker should deliver the encrypted prediction within seconds. There are two ways to receive it:
@@ -302,7 +329,41 @@ Help the user create an automated buyer that:
 5. **Acts** — uses the revealed prediction for trading decisions
 6. **Tracks** — monitors outcomes and adjusts evaluation thresholds
 
-Example buyer loop:
+### Auto-Buy Architecture
+
+For automated signal purchasing, use a slot-aware approach that maintains signal coverage across time horizons:
+
+**Slot-filling strategy:**
+- Maintain target slots per horizon (e.g., 1 signal per 5m horizon, 1 per 15m)
+- A slot "needs filling" when no active signal exists for that horizon AND the per-horizon cooldown has elapsed
+- Per-horizon cooldown (e.g., 180s) prevents rapid re-buying after a signal expires
+
+**Signal ranking — C*C score:**
+- Rank candidates by `confidence * calibration_score` (C*C) — this weights both the maker's stated confidence and their historical calibration accuracy
+- Apply a type diversity bonus: `0.1 / (1 + count_of_type_in_recent_purchases)` — encourages buying from different signal types rather than always picking the highest-rated type
+
+**Opportunistic outlier buying:**
+- Maintain a rolling average of C*C scores from recent purchases
+- If a signal's C*C exceeds `rolling_avg * outlier_multiplier` (e.g., 1.25 = 25% above average), buy it regardless of slot status
+- This captures exceptionally strong signals even when all slots are filled
+
+**Example config:**
+```yaml
+agdel:
+  autoBuy: true
+  autoBuyCooldownSeconds: 180
+  outlierCcMultiplier: 1.25
+  selection:
+    targetHorizons:
+      5m: 1
+      15m: 1
+    weightConfidence: 0.85
+    weightHitRate: 0.6
+    minSignalConfidence: 0.2
+    minConfCalib: 0.5
+```
+
+### Example buyer loop:
 
 ```python
 import asyncio
@@ -357,6 +418,70 @@ def passes_evaluation(reputation, criteria):
     )
 ```
 
+## Hyperliquid Trading Integration
+
+When integrating AGDEL signals with Hyperliquid for trade execution, be aware of these critical patterns:
+
+### Unified Account Equity
+
+Hyperliquid unified accounts hold USDC in the spot balance, which backs perp trading. The `clearinghouseState` API only reports perp-specific equity — which is near-zero when no position is open. **Always check both**:
+
+```python
+async def get_equity(self) -> float:
+    # Perp equity (may be near-zero with unified accounts)
+    perp_state = await self._http.post("/info", json={
+        "type": "clearinghouseState",
+        "user": self._main_address,
+    })
+    equity = float(perp_state.get("marginSummary", {}).get("accountValue", 0))
+
+    # Spot USDC (the real balance for unified accounts)
+    spot_state = await self._http.post("/info", json={
+        "type": "spotClearinghouseState",
+        "user": self._main_address,
+    })
+    for bal in spot_state.get("balances", []):
+        if bal.get("coin") == "USDC":
+            spot_usdc = float(bal.get("total", 0))
+            if spot_usdc > equity:
+                equity = spot_usdc
+            break
+
+    return equity
+```
+
+**Failure mode:** If you only check `clearinghouseState.accountValue`, the bot will think equity is ~$1 when spot USDC is $39+, causing flip orders to fail with tiny notional values.
+
+### Agent Wallet Pattern
+
+Hyperliquid supports agent (sub-account) wallets. The agent wallet signs transactions, but positions/funds live on the parent account:
+
+```python
+from hyperliquid.exchange import Exchange
+exchange = Exchange(
+    agent_wallet,
+    constants.MAINNET_API_URL,
+    account_address=parent_address,  # REQUIRED for agent wallets
+)
+```
+
+Without `account_address`, the SDK trades on the agent wallet's own (empty) account.
+
+### Minimum Order Size
+
+Hyperliquid enforces a $10 minimum notional value. The SDK may return `status: "ok"` but nest the rejection inside the response:
+
+```python
+resp = result.get("response", {})
+if isinstance(resp, dict):
+    statuses = resp.get("data", {}).get("statuses", [])
+    for s in statuses:
+        if isinstance(s, dict) and s.get("error"):
+            return TradeResult(success=False, error=s["error"])
+```
+
+Always enforce a minimum (e.g., $11) client-side. Skip the minimum check for close actions (`market_close` needs no size parameter).
+
 ## Troubleshooting
 
 ### MCP Connection Issues
@@ -390,6 +515,7 @@ def passes_evaluation(reputation, criteria):
 | USDC allowance error / `ERC20: insufficient allowance` | Set USDC approval for the marketplace contract. The MCP server tries this automatically but it requires HYPE for gas. |
 | Purchase returns 400 but button briefly shows "Bought" | The dashboard optimistically updates the button. Check the error in the purchase log or server logs. Common cause: gas or USDC issues above. |
 | `tx_hash is required` | You may be using the published `agdel-mcp` npm package which requires the caller to submit the on-chain tx. Use the local dev MCP server (`npx tsx mcp/server.ts` from the agdel monorepo root with `AGDEL_ONCHAIN=1`) which handles on-chain submission internally. |
+| `AlreadyPurchased` / error selector `0x3367b554` | Signal was already purchased (common after bot restart). Add hash to purchased set and skip. Do not retry. |
 
 ### Delivery Issues
 
@@ -398,6 +524,17 @@ def passes_evaluation(reputation, criteria):
 | No delivery after 30 seconds | Maker may have failed. Signal will be marked `delivery_defaulted` and you will be auto-refunded. |
 | Decryption fails | Verify your X25519 private key matches the public key you registered. Re-register if needed. |
 | Commitment hash mismatch after decryption | Fraudulent payload. Challenge the delivery via `agdel_market_challenge_delivery`. |
+
+### Hyperliquid Trading Issues
+
+| Symptom | Fix |
+|---------|-----|
+| Positions not opening despite successful API response | Check `account_address` is set in `Exchange()` init — agent wallets need parent address. |
+| Equity shows near-zero when flat | Unified account: USDC is in spot, not perp. Query `spotClearinghouseState` and use `max(perp_equity, spot_usdc)`. |
+| Flip orders fail with tiny notional | Same equity issue — must always check spot USDC, not just when equity==0. |
+| Order rejected but SDK says "ok" | Parse nested errors: `result["response"]["data"]["statuses"][*]["error"]`. |
+| "Order must have minimum value of $10" | Enforce $11 min notional client-side. Bump size up if equity allows. Skip check for close actions. |
+| Direction is inverted | AGDEL uses `0=long, 1=short`. Verify your mapping in `_convert_signal`. |
 
 ### Refund Issues
 

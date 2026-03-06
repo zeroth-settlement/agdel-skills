@@ -152,10 +152,14 @@ class AgdelBuyer:
         )
         self._usdc_balance: float = 0.0
 
+        self.auto_buy_cooldown: int = ac.get("autoBuyCooldownSeconds", 180)
+        self.outlier_cc_multiplier: float = ac.get("outlierCcMultiplier", 1.25)
+
         self.signals: dict[str, dict] = {}
         self.purchased_hashes: set[str] = set()
         self.purchase_log: deque[dict] = deque(maxlen=200)
         self.available_signals: list[dict] = []
+        self._last_buy_at: dict[str, float] = {}
         self._mcp_session: Any = None
         self._mcp_context: Any = None
         self._buyer_private_key: X25519PrivateKey | None = None
@@ -310,15 +314,131 @@ class AgdelBuyer:
                         result = await self._purchase_and_receive(candidate)
                         if result:
                             purchased.append(result)
+                    # Opportunistic: snap up outlier C*C signals
+                    outlier = self._find_outlier(signals)
+                    if outlier:
+                        result = await self._purchase_and_receive(outlier)
+                        if result:
+                            purchased.append(result)
         except Exception as e:
             self._stats["errors"] += 1
             logger.error("AGDEL poll error: %s", e)
         return purchased
 
-    def _filter_candidates(self, signals: list[dict]) -> list[dict]:
-        """Filter signals by basic criteria."""
-        candidates = []
+    def _needs_signal(self, horizon: str) -> bool:
+        """Check if a horizon slot needs a new signal."""
         now = time.time()
+        # Check if we already have an active signal for this horizon
+        sig = self.signals.get(horizon)
+        if sig:
+            expiry = sig.get("expiry_time", 0)
+            if expiry and now < expiry and now - sig.get("received_at", 0) < 960:
+                return False
+        # Cooldown: don't re-buy too quickly for the same horizon
+        last_buy = self._last_buy_at.get(horizon, 0)
+        if now - last_buy < self.auto_buy_cooldown:
+            return False
+        return True
+
+    def _recent_signal_types(self, n: int = 10) -> dict[str, int]:
+        """Count signal types in recent purchases."""
+        counts: dict[str, int] = {}
+        for entry in list(self.purchase_log)[:n]:
+            st = entry.get("signal_type", "unknown")
+            counts[st] = counts.get(st, 0) + 1
+        return counts
+
+    def _filter_candidates(self, signals: list[dict]) -> list[dict]:
+        """Filter and rank signals, returning at most one per horizon that needs filling."""
+        now = time.time()
+        # Determine which horizons need signals
+        needed = {hz for hz in self.target_horizons if self._needs_signal(hz)}
+        if not needed:
+            return []
+
+        # Build scored candidate list
+        recent_types = self._recent_signal_types()
+        scored: list[tuple[float, dict]] = []
+
+        for sig in signals:
+            commitment_hash = sig.get("commitment_hash", "")
+            if commitment_hash in self.purchased_hashes:
+                continue
+            expiry = sig.get("expiry_time", 0)
+            if isinstance(expiry, str):
+                try:
+                    expiry = int(expiry)
+                except ValueError:
+                    continue
+            if expiry - now < 30:
+                continue
+            horizon = sig.get("horizon_bucket") or _classify_horizon(expiry - now)
+            if horizon not in needed:
+                continue
+            confidence = float(sig.get("confidence", 0) or 0)
+            if confidence < self.min_confidence:
+                continue
+            raw_cost = float(sig.get("cost_usdc", 0) or 0)
+            cost = raw_cost / 1_000_000 if raw_cost > 100 else raw_cost
+            can_afford, _ = self.budget.can_spend(cost)
+            if not can_afford:
+                continue
+            rep = sig.get("maker_track_record", {})
+            win_rate = float(rep.get("hit_rate", rep.get("win_rate", 0)) or 0)
+            if win_rate < self.min_maker_win_rate:
+                continue
+            calibration = float(rep.get("calibration_score", 0) or 0)
+            cc = confidence * calibration
+
+            # Diversity bonus: boost under-represented signal types
+            sig_type = sig.get("signal_type", "unknown")
+            type_count = recent_types.get(sig_type, 0)
+            diversity_bonus = 0.1 / (1 + type_count)  # diminishes as type is seen more
+
+            rank_score = cc + diversity_bonus
+
+            scored.append((rank_score, {
+                **sig, "horizon": horizon, "cost": cost,
+                "maker": sig.get("maker_address", sig.get("maker", "")),
+                "confidence": confidence,
+                "calibration": calibration,
+                "conf_calib": round(cc, 4),
+                "signal_type": sig_type,
+            }))
+
+        # Sort by rank score descending, pick best per horizon
+        scored.sort(key=lambda x: x[0], reverse=True)
+        selected: list[dict] = []
+        filled: set[str] = set()
+        for _, candidate in scored:
+            hz = candidate["horizon"]
+            if hz in filled:
+                continue
+            selected.append(candidate)
+            filled.add(hz)
+            if filled == needed:
+                break
+
+        return selected
+
+    def _rolling_cc_avg(self) -> float:
+        """Average C*C from recent delivered purchases."""
+        vals = [
+            e.get("conf_calib", 0)
+            for e in list(self.purchase_log)[:20]
+            if e.get("conf_calib", 0) > 0
+        ]
+        return sum(vals) / len(vals) if vals else 0.0
+
+    def _find_outlier(self, signals: list[dict]) -> dict | None:
+        """Find a single exceptional C*C signal worth buying even if slot is filled."""
+        avg_cc = self._rolling_cc_avg()
+        if avg_cc <= 0:
+            return None
+        threshold = avg_cc * self.outlier_cc_multiplier
+        now = time.time()
+
+        best: tuple[float, dict] | None = None
         for sig in signals:
             commitment_hash = sig.get("commitment_hash", "")
             if commitment_hash in self.purchased_hashes:
@@ -335,23 +455,31 @@ class AgdelBuyer:
             if horizon not in self.target_horizons:
                 continue
             confidence = float(sig.get("confidence", 0) or 0)
-            if confidence < self.min_confidence:
+            rep = sig.get("maker_track_record", {})
+            calibration = float(rep.get("calibration_score", 0) or 0)
+            cc = confidence * calibration
+            if cc <= threshold:
                 continue
             raw_cost = float(sig.get("cost_usdc", 0) or 0)
             cost = raw_cost / 1_000_000 if raw_cost > 100 else raw_cost
             can_afford, _ = self.budget.can_spend(cost)
             if not can_afford:
                 continue
-            rep = sig.get("maker_track_record", {})
-            win_rate = float(rep.get("hit_rate", rep.get("win_rate", 0)) or 0)
-            if win_rate < self.min_maker_win_rate:
-                continue
-            candidates.append({
-                **sig, "horizon": horizon, "cost": cost,
-                "maker": sig.get("maker_address", sig.get("maker", "")),
-                "confidence": confidence,
-            })
-        return candidates
+            if best is None or cc > best[0]:
+                best = (cc, {
+                    **sig, "horizon": horizon, "cost": cost,
+                    "maker": sig.get("maker_address", sig.get("maker", "")),
+                    "confidence": confidence,
+                    "calibration": calibration,
+                    "conf_calib": round(cc, 4),
+                    "signal_type": sig.get("signal_type", "unknown"),
+                })
+
+        if best:
+            logger.info("Outlier signal found: C*C=%.3f (avg=%.3f, threshold=%.3f)",
+                        best[0], avg_cc, threshold)
+            return best[1]
+        return None
 
     async def _purchase_and_receive(self, candidate: dict) -> dict | None:
         commitment_hash = candidate.get("commitment_hash", "")
@@ -365,7 +493,10 @@ class AgdelBuyer:
             self.purchased_hashes.add(commitment_hash)
             self.budget.record(cost)
             self._stats["purchases"] += 1
-            logger.info("Purchased %s", commitment_hash[:12])
+            self._last_buy_at[candidate.get("horizon", "")] = time.time()
+            logger.info("Auto-purchased %s %s C*C=%.3f type=%s",
+                        candidate.get("horizon", "?"), commitment_hash[:12],
+                        candidate.get("conf_calib", 0), candidate.get("signal_type", "?"))
 
             if self.webhook_url:
                 self._pending_deliveries[commitment_hash] = {
@@ -399,6 +530,12 @@ class AgdelBuyer:
                 })
                 return None
         except Exception as e:
+            err_str = str(e)
+            # AlreadyPurchased: add to set so we don't retry
+            if "AlreadyPurchased" in err_str or "3367b554" in err_str:
+                self.purchased_hashes.add(commitment_hash)
+                logger.info("Already purchased %s, skipping", commitment_hash[:12])
+                return None
             self._stats["errors"] += 1
             logger.error("Purchase failed for %s: %s", commitment_hash[:12], e)
             self.purchase_log.appendleft({
@@ -536,8 +673,12 @@ class AgdelBuyer:
 
             return {"ok": True, "horizon": horizon, "cost": cost}
         except Exception as e:
+            err_str = str(e)
+            if "AlreadyPurchased" in err_str or "3367b554" in err_str:
+                self.purchased_hashes.add(commitment_hash)
+                return {"ok": False, "error": "Already purchased"}
             self._stats["errors"] += 1
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": err_str}
 
     async def _background_receive(self, candidate: dict):
         commitment_hash = candidate.get("commitment_hash", "")
@@ -677,6 +818,7 @@ class AgdelBuyer:
     def get_stats(self) -> dict:
         return {
             **self._stats,
+            "autoBuy": self.auto_buy,
             "budget": self.budget.status(),
             "purchasedCount": len(self.purchased_hashes),
         }
