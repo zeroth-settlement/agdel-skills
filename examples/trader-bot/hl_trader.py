@@ -14,6 +14,7 @@ logger = logging.getLogger("hl_trader")
 
 HL_API_URL = "https://api.hyperliquid.xyz"
 TAKER_FEE_PCT = 0.00035  # 0.035% per side
+MIN_ORDER_VALUE_USD = 11.0  # Hyperliquid requires $10 minimum; use $11 for safety
 
 
 @dataclass
@@ -106,7 +107,11 @@ class HLTrader:
                 wallet = Account.from_key(private_key)
 
                 self._info = Info(constants.MAINNET_API_URL)
-                self._exchange = Exchange(wallet, constants.MAINNET_API_URL)
+                # Agent/API wallet trades on behalf of the parent account
+                self._exchange = Exchange(
+                    wallet, constants.MAINNET_API_URL,
+                    account_address=self._main_address or None,
+                )
 
                 # Fetch asset metadata for index and size decimals
                 meta = self._info.meta()
@@ -154,6 +159,14 @@ class HLTrader:
             margin = state.get("marginSummary", {})
             equity = float(margin.get("accountValue", 0))
             available = float(margin.get("totalRawUsd", 0))
+
+            # Unified accounts: spot USDC is available for perp trading
+            if equity == 0:
+                spot_usdc = await self._get_spot_usdc()
+                if spot_usdc > 0:
+                    equity = spot_usdc
+                    available = spot_usdc
+
             portfolio = {
                 "equity": round(equity, 2),
                 "availableBalance": round(available, 2),
@@ -206,7 +219,7 @@ class HLTrader:
             return None
 
     async def get_portfolio(self) -> dict:
-        """Get account equity and balance."""
+        """Get account equity and balance (includes spot USDC for unified accounts)."""
         if self.mode == "paper":
             upnl = 0.0
             if self._paper_position:
@@ -229,6 +242,14 @@ class HLTrader:
             margin = state.get("marginSummary", {})
             equity = float(margin.get("accountValue", 0))
             available = float(margin.get("totalRawUsd", 0))
+
+            # Unified accounts: spot USDC is available for perp trading
+            if equity == 0:
+                spot_usdc = await self._get_spot_usdc()
+                if spot_usdc > 0:
+                    equity = spot_usdc
+                    available = spot_usdc
+
             return {
                 "equity": round(equity, 2),
                 "availableBalance": round(available, 2),
@@ -238,6 +259,24 @@ class HLTrader:
         except Exception as e:
             logger.error("Failed to get portfolio: %s", e)
             return {"equity": 0, "availableBalance": 0, "pnl": 0, "paper": self.mode == "paper"}
+
+    async def _get_spot_usdc(self) -> float:
+        """Fetch spot USDC balance for unified account support."""
+        if not self._main_address:
+            return 0.0
+        try:
+            resp = await self._http.post("/info", json={
+                "type": "spotClearinghouseState",
+                "user": self._main_address,
+            })
+            resp.raise_for_status()
+            data = resp.json()
+            for bal in data.get("balances", []):
+                if bal.get("coin") == "USDC":
+                    return float(bal.get("total", 0))
+        except Exception as e:
+            logger.debug("Spot USDC check failed: %s", e)
+        return 0.0
 
     async def execute(self, action: str, size_pct: float, mark_price: float) -> TradeResult | None:
         """Execute a trade action. Returns None if action is hold."""
@@ -345,6 +384,14 @@ class HLTrader:
         portfolio = await self.get_portfolio()
         equity = portfolio["equity"]
         notional = equity * self.risk_per_trade * self.max_leverage * size_pct
+        # Enforce Hyperliquid minimum order value
+        if notional < MIN_ORDER_VALUE_USD:
+            if equity >= MIN_ORDER_VALUE_USD:
+                notional = MIN_ORDER_VALUE_USD
+            else:
+                return TradeResult(success=False, action=action, size=0,
+                                   price=mark_price,
+                                   error=f"Equity ${equity:.2f} below minimum order ${MIN_ORDER_VALUE_USD:.0f}")
         size = round(notional / mark_price, self._sz_decimals) if mark_price > 0 else 0
 
         try:
@@ -391,9 +438,18 @@ class HLTrader:
                 logger.error("Live trade returned None for %s", action)
                 return TradeResult(success=False, action=action, size=size,
                                    price=mark_price, error="SDK returned None")
-            logger.info("Live trade raw result for %s: %s", action, str(result)[:200])
+            logger.info("Live trade raw result for %s: %s", action, str(result)[:300])
             if isinstance(result, dict):
                 status = result.get("status", "")
+                # Check for nested order errors (SDK returns status=ok even on order rejection)
+                resp = result.get("response", {})
+                if isinstance(resp, dict):
+                    statuses = resp.get("data", {}).get("statuses", [])
+                    for s in statuses:
+                        if isinstance(s, dict) and s.get("error"):
+                            logger.error("Live trade order rejected: %s", s["error"])
+                            return TradeResult(success=False, action=action, size=size,
+                                               price=mark_price, error=s["error"])
             else:
                 status = str(result)
             if status == "ok":

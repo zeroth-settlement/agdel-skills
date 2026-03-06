@@ -436,15 +436,18 @@ class AgdelBuyer:
         return None
 
     def _convert_signal(self, payload: dict, meta: dict) -> dict:
-        direction = payload.get("direction", 0)
-        if isinstance(direction, str):
-            direction = 1 if direction.lower() in ("long", "1") else -1
+        raw_dir = payload.get("direction", 0)
+        # AGDEL convention: 0 / "long" = long, 1 / "short" = short
+        if isinstance(raw_dir, str):
+            is_long = raw_dir.lower() in ("long", "0")
+        else:
+            is_long = raw_dir == 0
         confidence = meta.get("confidence", 0.5)
-        score = confidence * (1 if direction == 1 else -1)
+        score = confidence * (1 if is_long else -1)
         return {
             "source": "agdel", "score": score, "confidence": confidence,
             "horizon": meta.get("horizon", "5m"),
-            "direction": "long" if direction == 1 else "short",
+            "direction": "long" if is_long else "short",
             "target_price": payload.get("target_price"),
             "maker": meta.get("maker", ""),
             "commitment_hash": payload.get("commitment_hash", ""),

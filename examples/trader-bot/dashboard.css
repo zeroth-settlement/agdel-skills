@@ -278,9 +278,17 @@ body {
 }
 
 .error-cell {
-  max-width: 300px;
-  word-break: break-word;
+  white-space: nowrap;
   font-size: 10px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.error-cell[data-error] {
+  cursor: pointer;
+}
+.error-cell[data-error]:hover {
+  opacity: 0.7;
 }
 
 /* AGDEL status */

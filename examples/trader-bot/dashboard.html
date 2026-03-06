@@ -739,7 +739,7 @@ function renderPurchases(data) {
     <td class="${p.direction === 0 || p.direction === '0' || p.direction === 'long' ? 'pnl-positive' : p.direction === 1 || p.direction === '1' || p.direction === 'short' ? 'pnl-negative' : ''}">${p.direction === 0 || p.direction === '0' || p.direction === 'long' ? 'LONG' : p.direction === 1 || p.direction === '1' || p.direction === 'short' ? 'SHORT' : (p.direction || '--')}</td>
     <td>${p.target_price ? '$' + fmtNum(p.target_price, 2) : '--'}</td>
     <td class="${outcomeClass}">${outcomeLabel}</td>
-    <td class="pnl-negative error-cell" title="${p.error || ''}">${hasError ? p.error : ''}</td>
+    <td class="error-cell" ${hasError ? `data-error="${(p.error||'').replace(/"/g,'&quot;')}" onclick="copyError(this)" title="${(p.error||'').replace(/"/g,'&quot;')}"` : ''}>${hasError ? p.error : ''}</td>
   </tr>`;
   }).join('');
 }
@@ -825,6 +825,17 @@ async function buySignal(commitmentHash, btn) {
     boughtHashes.delete(commitmentHash);
     setTimeout(() => { btn.textContent = 'Buy'; btn.className = 'buy-btn'; btn.disabled = false; }, 3000);
   }
+}
+
+// ── Copy error to clipboard ──
+function copyError(el) {
+  const err = el.getAttribute('data-error');
+  if (!err) return;
+  const original = el.textContent;
+  navigator.clipboard.writeText(err).then(() => {
+    el.textContent = 'Copied!';
+    setTimeout(() => { el.textContent = original; }, 1500);
+  });
 }
 
 // ── Direct close position ──
