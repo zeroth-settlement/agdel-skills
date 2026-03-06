@@ -3,376 +3,1068 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AGDEL Trader Bot</title>
-  <style>
-    :root {
-      --bg-primary: #0d1117; --bg-secondary: #161b22; --bg-card: #1c2128;
-      --bg-hover: #21262d; --border: #30363d; --text-primary: #e6edf3;
-      --text-secondary: #8b949e; --text-muted: #6e7681;
-      --green: #3fb950; --green-dim: #1a4d2e; --red: #f85149; --red-dim: #4d1a1a;
-      --yellow: #d29922; --blue: #58a6ff; --purple: #bc8cff;
-      --font-mono: 'SF Mono', 'Fira Code', monospace;
-      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: var(--font-sans); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; }
-
-    .header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); }
-    .header-left { display: flex; align-items: center; gap: 12px; }
-    .header-title { font-size: 15px; font-weight: 600; }
-    .header-asset { font-family: var(--font-mono); color: var(--blue); font-weight: 600; }
-    .badge { display: inline-flex; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
-    .badge-paper { background: var(--yellow); color: #000; }
-    .badge-live { background: var(--red); color: #fff; }
-    .badge-connected { background: var(--green-dim); color: var(--green); }
-    .badge-disconnected { background: var(--red-dim); color: var(--red); }
-    .header-right { display: flex; align-items: center; gap: 8px; }
-    .mode-btn { padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text-primary); cursor: pointer; font-size: 12px; }
-
-    .market-strip { display: flex; align-items: center; gap: 24px; padding: 8px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; }
-    .price-main { font-size: 20px; font-weight: 700; }
-
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 16px; }
-    .grid-full { grid-column: 1 / -1; }
-    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
-    .card-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-    .stat-row { display: flex; justify-content: space-between; padding: 2px 0; font-family: var(--font-mono); font-size: 12px; }
-    .stat-label { color: var(--text-secondary); }
-    .pnl-positive { color: var(--green); }
-    .pnl-negative { color: var(--red); }
-
-    .position-side { font-size: 18px; font-weight: 700; text-transform: uppercase; }
-    .position-side.long { color: var(--green); }
-    .position-side.short { color: var(--red); }
-    .position-side.flat { color: var(--text-muted); }
-
-    .signal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .signal-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
-    .signal-state { font-size: 13px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 4px; }
-    .state-STRONG_LONG { color: var(--green); }
-    .state-LEAN_LONG { color: #85e89d; }
-    .state-FLAT { color: var(--text-muted); }
-    .state-LEAN_SHORT { color: #f97583; }
-    .state-STRONG_SHORT { color: var(--red); }
-    .state-NONE { color: var(--text-muted); }
-
-    /* Approval panel — the key human intervention UI */
-    .approval-panel { background: var(--bg-secondary); border: 2px solid var(--yellow); border-radius: 8px; padding: 16px; margin-bottom: 8px; }
-    .approval-panel.no-action { border-color: var(--border); opacity: 0.7; }
-    .approval-action { font-size: 20px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 8px; }
-    .approval-buttons { display: flex; gap: 12px; margin-top: 12px; }
-    .btn-approve { padding: 8px 24px; border: 2px solid var(--green); border-radius: 6px; background: var(--green-dim); color: var(--green); font-size: 14px; font-weight: 700; cursor: pointer; }
-    .btn-approve:hover { background: var(--green); color: #000; }
-    .btn-reject { padding: 8px 24px; border: 2px solid var(--red); border-radius: 6px; background: var(--red-dim); color: var(--red); font-size: 14px; font-weight: 700; cursor: pointer; }
-    .btn-reject:hover { background: var(--red); color: #fff; }
-    .btn-approve:disabled, .btn-reject:disabled { opacity: 0.4; cursor: default; }
-
-    .data-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
-    .data-table th { text-align: left; padding: 6px 8px; color: var(--text-secondary); font-weight: 600; border-bottom: 1px solid var(--border); font-size: 10px; text-transform: uppercase; }
-    .data-table td { padding: 5px 8px; border-bottom: 1px solid var(--bg-hover); }
-    .data-table tr:hover td { background: var(--bg-hover); }
-
-    .buy-btn { padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); color: var(--blue); cursor: pointer; font-family: var(--font-mono); font-size: 10px; font-weight: 600; }
-    .buy-btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--blue); }
-    .budget-bar { height: 6px; border-radius: 3px; background: var(--bg-secondary); margin: 4px 0; }
-    .budget-fill { height: 100%; border-radius: 3px; background: var(--blue); transition: width 0.3s; }
-
-    .scroll-table { overflow-y: auto; max-height: 320px; }
-
-    @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } .signal-grid { grid-template-columns: 1fr; } }
-  </style>
+  <title>Trader Bot Basic</title>
+  <link rel="stylesheet" href="/dashboard.css">
 </head>
 <body>
 
+<!-- Header -->
 <div class="header">
   <div class="header-left">
-    <span class="header-title">AGDEL Trader Bot</span>
+    <span class="header-title">Trader Bot Basic</span>
     <span class="header-asset" id="asset">ETH</span>
     <span class="badge" id="mode-badge">PAPER</span>
   </div>
   <div class="header-right">
-    <button class="mode-btn" onclick="toggleMode()">Switch to Live</button>
+    <button class="mode-btn" id="mode-toggle" onclick="toggleMode()">Switch to Live</button>
     <span class="badge" id="ws-status">--</span>
   </div>
 </div>
 
+<!-- Warning banner -->
+<div class="warning-banner">
+  This is a minimal implementation trader bot. There is no real logic here to determine if you should A) buy a signal or B) open a position. It is meant to illustrate how the predictions might affect a more sophisticated trading approach. If you flip to live mode you will be able to make trades on Hyperliquid — <strong>DO SO AT YOUR OWN RISK!</strong>
+</div>
+
+<!-- Market strip -->
 <div class="market-strip">
   <span class="price-main" id="mark-price">$0.00</span>
   <span style="color: var(--text-secondary)">Mode: <span id="mode-label">Paper</span></span>
+  <span style="color: var(--text-secondary)">Tick: <span id="tick-age">--</span></span>
 </div>
 
+<!-- Main grid -->
 <div class="grid">
 
-  <!-- APPROVE / REJECT — the human intervention panel -->
-  <div class="card grid-full">
-    <div class="card-header">Trade Recommendation</div>
-    <div class="approval-panel no-action" id="approval-panel">
-      <div class="approval-action" id="approval-action">NO PENDING ACTION</div>
-      <div class="stat-row"><span class="stat-label">Fast Signal</span><span id="approval-fast">--</span></div>
-      <div class="stat-row"><span class="stat-label">Slow Signal</span><span id="approval-slow">--</span></div>
-      <div class="stat-row"><span class="stat-label">Reason</span><span id="approval-reason">--</span></div>
-      <div class="approval-buttons">
-        <button class="btn-approve" id="btn-approve" onclick="approveTrade()" disabled>APPROVE</button>
-        <button class="btn-reject" id="btn-reject" onclick="rejectTrade()" disabled>REJECT</button>
+  <!-- HL Position card (always from Hyperliquid) -->
+  <div class="card">
+    <div class="card-header">HL Position</div>
+    <div class="position-side flat" id="hl-pos-side">FLAT</div>
+    <div class="stat-row"><span class="stat-label">Size</span><span class="stat-value" id="hl-pos-size">0</span></div>
+    <div class="stat-row"><span class="stat-label">Entry</span><span class="stat-value" id="hl-pos-entry">--</span></div>
+    <div class="stat-row"><span class="stat-label">uPnL</span><span class="stat-value" id="hl-pos-pnl">$0.00</span></div>
+    <div class="stat-row"><span class="stat-label">Leverage</span><span class="stat-value" id="hl-pos-lev">--</span></div>
+    <div class="stat-row"><span class="stat-label">Equity</span><span class="stat-value" id="hl-equity">$0.00</span></div>
+    <div class="stat-row"><span class="stat-label">Available</span><span class="stat-value" id="hl-available">$0.00</span></div>
+    <div style="margin-top:6px; border-top:1px solid var(--border); padding-top:6px;">
+      <div style="font-size:10px; color:var(--text-secondary); margin-bottom:4px;">Bot Position (<span id="bot-mode-label">Paper</span>)</div>
+      <div class="stat-row"><span class="stat-label">Side</span><span class="stat-value" id="pos-side">FLAT</span></div>
+      <div class="stat-row"><span class="stat-label">Size</span><span class="stat-value" id="pos-size">0</span></div>
+      <div class="stat-row"><span class="stat-label">Equity</span><span class="stat-value" id="equity">$0.00</span></div>
+      <div class="stat-row"><span class="stat-label">Net PnL</span><span class="stat-value" id="net-pnl">$0.00</span></div>
+    </div>
+    <div id="direct-close" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px; display:none;">
+      <button class="trade-action-btn close" id="close-pos-btn" onclick="closePosition()">Close Position</button>
+    </div>
+    <div id="trade-actions" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px; display:none;">
+      <div style="font-size:10px; color:var(--text-secondary); margin-bottom:6px;">Matrix Recommendation</div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <button class="trade-action-btn" id="approve-btn" onclick="approveTrade()">--</button>
+        <button class="trade-reject-btn" id="reject-btn" onclick="rejectTrade()">Reject</button>
+        <span style="font-size:10px; color:var(--text-muted);" id="trade-reason"></span>
       </div>
     </div>
   </div>
 
-  <!-- Position -->
+  <!-- Signal cards -->
   <div class="card">
-    <div class="card-header">Position</div>
-    <div class="position-side flat" id="pos-side-display">FLAT</div>
-    <div class="stat-row"><span class="stat-label">Size</span><span id="pos-size">0</span></div>
-    <div class="stat-row"><span class="stat-label">Entry</span><span id="pos-entry">--</span></div>
-    <div class="stat-row"><span class="stat-label">uPnL</span><span id="pos-pnl">$0.00</span></div>
-    <div class="stat-row"><span class="stat-label">Equity</span><span id="equity">$0.00</span></div>
-    <div class="stat-row"><span class="stat-label">Net PnL</span><span id="net-pnl">$0.00</span></div>
-  </div>
-
-  <!-- AGDEL Status -->
-  <div class="card">
-    <div class="card-header">AGDEL Marketplace</div>
-    <div class="stat-row"><span class="stat-label">Buyer</span><span id="wallet-addr" style="font-size:11px;font-family:var(--font-mono)">--</span></div>
-    <div class="stat-row"><span class="stat-label">USDC</span><span id="wallet-usdc">$0.00</span></div>
-    <div class="stat-row"><span class="stat-label">Purchased</span><span id="agdel-count">0</span></div>
-    <div class="stat-row"><span class="stat-label">Last Poll</span><span id="agdel-poll">--</span></div>
-    <div style="margin-top:8px">
-      <div style="font-size:10px;color:var(--text-secondary)">Hourly Budget</div>
-      <div class="budget-bar"><div class="budget-fill" id="budget-hourly" style="width:0%"></div></div>
-      <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">Daily Budget</div>
-      <div class="budget-bar"><div class="budget-fill" id="budget-daily" style="width:0%"></div></div>
-    </div>
-  </div>
-
-  <!-- Signals -->
-  <div class="card grid-full">
     <div class="card-header">Signals</div>
-    <div class="signal-grid">
-      <div class="signal-card">
-        <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">FAST (5m)</div>
+    <div class="signal-grid signal-grid-stacked">
+      <div class="signal-card" id="signal-fast">
+        <div style="font-size:10px; color:var(--text-secondary); margin-bottom:4px;">FAST (5m)</div>
         <div class="signal-state state-NONE" id="fast-signal-state">NO SIGNAL</div>
-        <div class="stat-row"><span class="stat-label">Score</span><span id="fast-score">--</span></div>
-        <div class="stat-row"><span class="stat-label">Confidence</span><span id="fast-conf">--</span></div>
-        <div class="stat-row"><span class="stat-label">Direction</span><span id="fast-dir">--</span></div>
+        <div class="stat-row"><span class="stat-label">Score</span><span class="stat-value" id="fast-score">--</span></div>
+        <div class="stat-row"><span class="stat-label">Confidence</span><span class="stat-value" id="fast-conf">--</span></div>
+        <div class="stat-row"><span class="stat-label">Direction</span><span class="stat-value" id="fast-dir">--</span></div>
+        <div class="stat-row"><span class="stat-label">Age</span><span class="stat-value" id="fast-age">--</span></div>
       </div>
-      <div class="signal-card">
-        <div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px">SLOW (15m)</div>
+      <div class="signal-card" id="signal-slow">
+        <div style="font-size:10px; color:var(--text-secondary); margin-bottom:4px;">SLOW (15m)</div>
         <div class="signal-state state-NONE" id="slow-signal-state">NO SIGNAL</div>
-        <div class="stat-row"><span class="stat-label">Score</span><span id="slow-score">--</span></div>
-        <div class="stat-row"><span class="stat-label">Confidence</span><span id="slow-conf">--</span></div>
-        <div class="stat-row"><span class="stat-label">Direction</span><span id="slow-dir">--</span></div>
+        <div class="stat-row"><span class="stat-label">Score</span><span class="stat-value" id="slow-score">--</span></div>
+        <div class="stat-row"><span class="stat-label">Confidence</span><span class="stat-value" id="slow-conf">--</span></div>
+        <div class="stat-row"><span class="stat-label">Direction</span><span class="stat-value" id="slow-dir">--</span></div>
+        <div class="stat-row"><span class="stat-label">Age</span><span class="stat-value" id="slow-age">--</span></div>
       </div>
     </div>
+  </div>
+
+  <!-- Prediction Gravity chart (full width) -->
+  <div class="card card-gravity grid-full">
+    <div class="card-header">Prediction Gravity</div>
+    <div class="gravity-chart-container">
+      <canvas id="gravity-canvas"></canvas>
+    </div>
+    <div class="gravity-footer">
+      <span class="matrix-action-mini" id="matrix-action" style="color:var(--text-muted)">HOLD</span>
+      <span style="color:var(--text-secondary)">F:<span class="signal-state" id="fast-state">--</span></span>
+      <span style="color:var(--text-secondary)">S:<span class="signal-state" id="slow-state">--</span></span>
+      <span style="color:var(--text-secondary)">Size:<span id="size-tier">--</span></span>
+    </div>
+  </div>
+
+  <!-- Recent purchases table -->
+  <div class="card grid-full">
+    <div class="card-header">Recent Purchases</div>
+    <table class="data-table">
+      <thead><tr>
+        <th>ID</th><th>Duration</th><th>Hz</th><th>Maker</th><th>Cost</th><th>Conf</th><th>C*C</th><th>Type</th><th>Direction</th><th>Target</th><th>Outcome</th><th>Error</th>
+      </tr></thead>
+      <tbody id="purchases-body"></tbody>
+    </table>
   </div>
 
   <!-- Available Signals -->
   <div class="card grid-full">
-    <div class="card-header">Available Signals <span id="avail-count" style="font-size:11px;color:var(--text-secondary)">0</span></div>
-    <div class="scroll-table">
+    <div class="card-header">
+      Available Signals
+      <span class="filter-count" id="avail-count">0 signals</span>
+    </div>
+    <div class="scroll-table" style="max-height: 320px;">
       <table class="data-table">
-        <thead><tr><th>ID</th><th>Hz</th><th>Maker</th><th>Cost</th><th>Conf</th><th>Quality</th><th>Win Rate</th><th></th></tr></thead>
+        <thead>
+          <tr>
+            <th>ID</th><th>Expires</th><th>Hz</th><th>Maker</th><th>Cost</th><th>Conf</th><th>C*C</th><th>Type</th><th>Quality</th><th>Win Rate</th><th>Calib</th><th></th>
+          </tr>
+          <tr class="filter-row">
+            <th></th>
+            <th></th>
+            <th class="hz-popover-cell">
+              <button class="hz-popover-btn" id="hz-btn" onclick="toggleHzPopover(event)">5m|15m</button>
+              <div class="hz-popover" id="hz-popover">
+                <label><input type="checkbox" value="1m" onchange="updateHzFilter()">1m</label>
+                <label><input type="checkbox" value="5m" checked onchange="updateHzFilter()">5m</label>
+                <label><input type="checkbox" value="15m" checked onchange="updateHzFilter()">15m</label>
+                <label><input type="checkbox" value="30m" onchange="updateHzFilter()">30m</label>
+                <label><input type="checkbox" value="1h" onchange="updateHzFilter()">1h</label>
+              </div>
+            </th>
+            <th><input type="text" id="f-maker" placeholder="0x..." oninput="renderAvailable()"></th>
+            <th></th>
+            <th></th>
+            <th><input type="number" id="f-confcalib" step="0.05" min="0" max="1" placeholder="min" onchange="renderAvailable()"></th>
+            <th></th>
+            <th><input type="number" id="f-quality" step="0.05" min="0" max="1" placeholder="min" onchange="renderAvailable()"></th>
+            <th><input type="number" id="f-winrate" step="0.05" min="0" max="1" placeholder="min" onchange="renderAvailable()"></th>
+            <th></th>
+            <th></th>
+          </tr>
+        </thead>
         <tbody id="avail-body"></tbody>
       </table>
     </div>
   </div>
 
-  <!-- Trade History -->
+  <!-- AGDEL status -->
+  <div class="card">
+    <div class="card-header">AGDEL Marketplace</div>
+    <div class="stat-row"><span class="stat-label">Buyer</span><span class="stat-value wallet-addr" id="wallet-addr" title="">--</span></div>
+    <div class="stat-row"><span class="stat-label">USDC Balance</span><span class="stat-value" id="wallet-usdc">$0.00</span></div>
+    <div class="stat-row"><span class="stat-label">Purchased</span><span class="stat-value" id="agdel-count">0</span></div>
+    <div class="stat-row"><span class="stat-label">Last Poll</span><span class="stat-value" id="agdel-poll">--</span></div>
+    <div class="stat-row"><span class="stat-label">Errors</span><span class="stat-value" id="agdel-errors">0</span></div>
+    <div style="margin-top:8px;">
+      <div style="font-size:10px; color:var(--text-secondary);">Hourly Budget</div>
+      <div class="budget-bar"><div class="budget-fill" id="budget-hourly" style="width:0%"></div></div>
+      <div style="font-size:10px; color:var(--text-secondary); margin-top:4px;">Daily Budget</div>
+      <div class="budget-bar"><div class="budget-fill" id="budget-daily" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <!-- Reflection status -->
+  <div class="card">
+    <div class="card-header">Reflection</div>
+    <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value" id="refl-status">--</span></div>
+    <div class="stat-row"><span class="stat-label">Last Run</span><span class="stat-value" id="refl-last">--</span></div>
+    <div class="stat-row"><span class="stat-label">Next In</span><span class="stat-value" id="refl-next">--</span></div>
+    <div class="reflection-summary" id="refl-summary" style="display:none;"></div>
+    <div id="refl-params"></div>
+  </div>
+
+  <!-- Trade history table -->
   <div class="card grid-full">
     <div class="card-header">Trade History</div>
     <table class="data-table">
-      <thead><tr><th>Time</th><th>Action</th><th>Size</th><th>Price</th><th>PnL</th></tr></thead>
+      <thead><tr>
+        <th>Time</th><th>Action</th><th>Size</th><th>Price</th><th>PnL</th><th>Fee</th>
+      </tr></thead>
       <tbody id="trades-body"></tbody>
     </table>
   </div>
 
 </div>
 
-<script>
-let ws = null, state = {}, reconnectDelay = 1000;
+<!-- Signal detail modal -->
+<div class="modal-overlay" id="signal-modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">Signal Detail</span>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div id="modal-body"><div class="modal-loading">Loading...</div></div>
+  </div>
+</div>
 
+<script>
+// ── State ──
+let ws = null;
+let state = {};
+let reconnectDelay = 1000;
+
+// ── Gravity chart state ──
+const PRICE_WINDOW = 15 * 60; // 15 min of price history (seconds)
+let priceBuffer = [];  // [{timestamp, markPrice}]
+let predictions = [];  // [{targetPrice, expiryTime, direction, confCalib, qualityScore, horizon, hash}]
+
+// ── WebSocket ──
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
-  ws.onopen = () => { reconnectDelay = 1000; document.getElementById('ws-status').textContent = 'Connected'; document.getElementById('ws-status').className = 'badge badge-connected'; };
-  ws.onmessage = (e) => { try { state = JSON.parse(e.data); if (state.timestamp) updateDashboard(state); } catch(err) {} };
-  ws.onclose = () => { document.getElementById('ws-status').textContent = 'Disconnected'; document.getElementById('ws-status').className = 'badge badge-disconnected'; setTimeout(connectWS, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); };
+
+  ws.onopen = () => {
+    reconnectDelay = 1000;
+    updateConnectionStatus(true);
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'reflection') {
+        updateReflection(data.data);
+      } else if (data.type === 'resolution') {
+        loadPurchases();
+      } else if (data.timestamp) {
+        state = data;
+        updateDashboard(data);
+      }
+    } catch (err) { console.error('Parse error:', err); }
+  };
+
+  ws.onclose = () => {
+    updateConnectionStatus(false);
+    setTimeout(connectWS, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+  };
+
   ws.onerror = () => ws.close();
 }
 
-function updateDashboard(d) {
-  const mode = d.tradingMode || 'paper';
-  document.getElementById('mode-badge').textContent = mode.toUpperCase();
-  document.getElementById('mode-badge').className = 'badge ' + (mode === 'live' ? 'badge-live' : 'badge-paper');
-  document.getElementById('mode-label').textContent = mode === 'live' ? 'Live' : 'Paper';
-  document.getElementById('asset').textContent = d.asset || 'ETH';
-  document.getElementById('mark-price').textContent = '$' + (d.markPrice || 0).toFixed(2);
+function updateConnectionStatus(connected) {
+  const el = document.getElementById('ws-status');
+  el.textContent = connected ? 'Connected' : 'Disconnected';
+  el.className = 'badge ' + (connected ? 'badge-connected' : 'badge-disconnected');
+}
 
-  // Position
+// ── Dashboard update ──
+function updateDashboard(d) {
+  // Mode
+  const modeBadge = document.getElementById('mode-badge');
+  modeBadge.textContent = d.tradingMode.toUpperCase();
+  modeBadge.className = 'badge ' + (d.tradingMode === 'live' ? 'badge-live' : 'badge-paper');
+  document.getElementById('mode-label').textContent = d.tradingMode === 'live' ? 'Live' : 'Paper';
+  document.getElementById('mode-toggle').textContent = d.tradingMode === 'live' ? 'Switch to Paper' : 'Switch to Live';
+  document.getElementById('asset').textContent = d.asset || 'ETH';
+
+  // Price
+  document.getElementById('mark-price').textContent = '$' + fmtNum(d.markPrice, 2);
+  document.getElementById('tick-age').textContent = timeAgo(d.timestamp);
+
+  // HL Position (always from Hyperliquid API)
+  const hlPos = d.hlPosition || {};
+  const hlSide = hlPos.side || 'flat';
+  const hlSideEl = document.getElementById('hl-pos-side');
+  hlSideEl.textContent = hlSide.toUpperCase();
+  hlSideEl.className = 'position-side ' + hlSide;
+  document.getElementById('hl-pos-size').textContent = hlPos.size ? Math.abs(hlPos.size).toFixed(4) : '0';
+  document.getElementById('hl-pos-entry').textContent = hlPos.entryPrice ? '$' + fmtNum(hlPos.entryPrice, 2) : '--';
+  setPnl('hl-pos-pnl', hlPos.unrealizedPnl || 0);
+  document.getElementById('hl-pos-lev').textContent = hlPos.leverage ? hlPos.leverage + 'x' : '--';
+
+  // HL Portfolio (always from Hyperliquid API)
+  const hlPf = d.hlPortfolio || {};
+  document.getElementById('hl-equity').textContent = '$' + fmtNum(hlPf.equity || 0, 2);
+  document.getElementById('hl-available').textContent = '$' + fmtNum(hlPf.availableBalance || 0, 2);
+
+  // Direct close button — show when HL has an open position and mode is live
+  const closeDiv = document.getElementById('direct-close');
+  if (hlSide !== 'flat' && d.tradingMode === 'live') {
+    closeDiv.style.display = 'block';
+  } else {
+    closeDiv.style.display = 'none';
+  }
+
+  // Bot position (paper or live, used for matrix decisions)
   const pos = d.position || {};
   const side = pos.side || 'flat';
-  const sideEl = document.getElementById('pos-side-display');
-  sideEl.textContent = side.toUpperCase();
-  sideEl.className = 'position-side ' + side;
+  document.getElementById('pos-side').textContent = side.toUpperCase();
   document.getElementById('pos-size').textContent = pos.size ? Math.abs(pos.size).toFixed(4) : '0';
-  document.getElementById('pos-entry').textContent = pos.entryPrice ? '$' + pos.entryPrice.toFixed(2) : '--';
-  setPnl('pos-pnl', pos.unrealizedPnl || 0);
+  document.getElementById('bot-mode-label').textContent = d.tradingMode === 'live' ? 'Live' : 'Paper';
+
+  // Bot Portfolio
   const pf = d.portfolio || {};
-  document.getElementById('equity').textContent = '$' + (pf.equity || 0).toFixed(2);
+  document.getElementById('equity').textContent = '$' + fmtNum(pf.equity || 0, 2);
   setPnl('net-pnl', pf.pnl || 0);
 
-  // Approval panel
-  const pa = d.pendingApproval;
-  const panel = document.getElementById('approval-panel');
-  const actionEl = document.getElementById('approval-action');
-  if (pa) {
-    panel.className = 'approval-panel';
-    actionEl.textContent = pa.action.toUpperCase().replace(/_/g, ' ');
-    actionEl.style.color = actionColor(pa.action);
-    document.getElementById('approval-fast').textContent = pa.fast_state || '--';
-    document.getElementById('approval-slow').textContent = pa.slow_state || '--';
-    document.getElementById('approval-reason').textContent = pa.reason || '--';
-    document.getElementById('btn-approve').disabled = false;
-    document.getElementById('btn-reject').disabled = false;
+  // Trade action button
+  const pending = d.pendingApproval;
+  const actionsDiv = document.getElementById('trade-actions');
+  const approveBtn = document.getElementById('approve-btn');
+  const reasonEl = document.getElementById('trade-reason');
+  if (pending && pending.action && pending.action !== 'hold') {
+    actionsDiv.style.display = 'block';
+    const label = pending.action.replace(/_/g, ' ').toUpperCase();
+    approveBtn.textContent = label;
+    approveBtn.disabled = false;
+    approveBtn.className = 'trade-action-btn' +
+      (pending.action.includes('short') || pending.action === 'flip_short' ? ' short' : '') +
+      (pending.action === 'close' ? ' close' : '');
+    reasonEl.textContent = pending.reason || '';
   } else {
-    panel.className = 'approval-panel no-action';
-    actionEl.textContent = 'NO PENDING ACTION';
-    actionEl.style.color = 'var(--text-muted)';
-    document.getElementById('approval-fast').textContent = '--';
-    document.getElementById('approval-slow').textContent = '--';
-    document.getElementById('approval-reason').textContent = '--';
-    document.getElementById('btn-approve').disabled = true;
-    document.getElementById('btn-reject').disabled = true;
+    actionsDiv.style.display = 'none';
   }
+
+  // Matrix
+  const ma = d.matrixAction || {};
+  const actionEl = document.getElementById('matrix-action');
+  actionEl.textContent = (ma.action || 'HOLD').toUpperCase().replace(/_/g, ' ');
+  actionEl.style.color = actionColor(ma.action);
+
+  setStateClass('fast-state', ma.fastState || '--');
+  setStateClass('slow-state', ma.slowState || '--');
+  document.getElementById('size-tier').textContent = ma.sizeTier || '--';
 
   // Signals
   updateSignal('fast', d.signals?.fast);
   updateSignal('slow', d.signals?.slow);
 
-  // AGDEL
+  // Push tick to price buffer
+  if (d.markPrice > 0) {
+    pushTick(d.timestamp, d.markPrice);
+  }
+
+  // Update predictions from WebSocket state
+  if (d.predictions) {
+    predictions = d.predictions;
+  }
+
+  // Redraw gravity chart
+  drawGravityChart();
+
+  // AGDEL (buyer address + balance + stats)
   const w = d.wallet || {};
-  document.getElementById('wallet-addr').textContent = w.addressShort || '--';
-  document.getElementById('wallet-usdc').textContent = '$' + (w.usdcBalance || 0).toFixed(4);
+  const addrEl = document.getElementById('wallet-addr');
+  addrEl.textContent = w.addressShort || '--';
+  addrEl.title = w.address || '';
+  const usdcEl = document.getElementById('wallet-usdc');
+  usdcEl.textContent = '$' + fmtNum(w.usdcBalance, 4);
+  usdcEl.className = 'stat-value ' + (w.usdcBalance > 1 ? 'pnl-positive' : 'pnl-negative');
+
+  // AGDEL
   const ag = d.agdel || {};
   document.getElementById('agdel-count').textContent = ag.purchasedCount || 0;
   document.getElementById('agdel-poll').textContent = ag.lastPollAt ? timeAgo(ag.lastPollAt) : '--';
+  document.getElementById('agdel-errors').textContent = ag.errors || 0;
+
   const budget = ag.budget || {};
-  setBudgetBar('budget-hourly', budget.hourlySpend, budget.hourlyLimit);
-  setBudgetBar('budget-daily', budget.dailySpend, budget.dailyLimit);
+  updateBudgetBar('budget-hourly', budget.hourlySpend || 0, budget.hourlyLimit || 10);
+  updateBudgetBar('budget-daily', budget.dailySpend || 0, budget.dailyLimit || 50);
 
   // Available signals
-  renderAvailable(d.availableSignals || []);
+  renderAvailable();
 
-  // Trades
-  renderTrades(d);
+  // Purchases (real-time from tick)
+  if (d.purchases) {
+    renderPurchases(d.purchases);
+  }
 }
 
 function updateSignal(prefix, sig) {
+  const stateEl = document.getElementById(prefix + '-signal-state');
   if (!sig || !sig.active) {
-    document.getElementById(prefix + '-signal-state').textContent = 'NO SIGNAL';
-    document.getElementById(prefix + '-signal-state').className = 'signal-state state-NONE';
-    document.getElementById(prefix + '-score').textContent = '--';
-    document.getElementById(prefix + '-conf').textContent = '--';
-    document.getElementById(prefix + '-dir').textContent = '--';
+    stateEl.textContent = 'NO SIGNAL';
+    stateEl.className = 'signal-state state-NONE';
+    ['score', 'conf', 'dir', 'age'].forEach(k =>
+      document.getElementById(prefix + '-' + k).textContent = '--');
     return;
   }
-  document.getElementById(prefix + '-signal-state').textContent = sig.state;
-  document.getElementById(prefix + '-signal-state').className = 'signal-state state-' + sig.state;
-  document.getElementById(prefix + '-score').textContent = sig.score.toFixed(4);
-  document.getElementById(prefix + '-conf').textContent = sig.confidence.toFixed(4);
-  document.getElementById(prefix + '-dir').textContent = sig.direction || '--';
+  stateEl.textContent = sig.state;
+  stateEl.className = 'signal-state state-' + sig.state;
+  document.getElementById(prefix + '-score').textContent = sig.score?.toFixed(4) || '--';
+  document.getElementById(prefix + '-conf').textContent = sig.confidence ? (sig.confidence * 100).toFixed(1) + '%' : '--';
+  const dirVal = sig.direction;
+  const dirEl = document.getElementById(prefix + '-dir');
+  const isLong = dirVal === 0 || dirVal === '0' || dirVal === 'long';
+  const isShort = dirVal === 1 || dirVal === '1' || dirVal === 'short';
+  dirEl.textContent = isLong ? 'LONG' : isShort ? 'SHORT' : (dirVal || '--');
+  dirEl.className = isLong ? 'stat-value pnl-positive' : isShort ? 'stat-value pnl-negative' : 'stat-value';
+  document.getElementById(prefix + '-age').textContent = sig.age != null ? sig.age + 's' : '--';
 }
 
-function renderAvailable(signals) {
-  const body = document.getElementById('avail-body');
-  document.getElementById('avail-count').textContent = signals.length + ' signals';
-  body.innerHTML = signals.slice(0, 20).map(s => `<tr>
-    <td style="font-size:10px;color:var(--blue)">${s.commitmentHashShort || '--'}</td>
-    <td>${s.horizon || '--'}</td>
-    <td>${s.maker || '--'}</td>
-    <td>$${(s.cost || 0).toFixed(2)}</td>
-    <td>${(s.confidence || 0).toFixed(2)}</td>
-    <td>${(s.quality || 0).toFixed(2)}</td>
-    <td>${((s.winRate || 0) * 100).toFixed(0)}%</td>
-    <td><button class="buy-btn" onclick="buySignal('${s.commitmentHash}', this)">BUY</button></td>
-  </tr>`).join('');
+// ── Gravity chart ──
+function pushTick(ts, price) {
+  priceBuffer.push({ timestamp: ts, markPrice: price });
+  const cutoff = ts - PRICE_WINDOW;
+  while (priceBuffer.length > 0 && priceBuffer[0].timestamp < cutoff) {
+    priceBuffer.shift();
+  }
 }
 
-function renderTrades(d) {
-  // Fetch trades from history if available
-  fetch('/api/trades').then(r => r.json()).then(trades => {
-    const body = document.getElementById('trades-body');
-    body.innerHTML = trades.slice(0, 20).map(t => `<tr>
-      <td>${new Date(t.timestamp * 1000).toLocaleTimeString()}</td>
-      <td style="color:${actionColor(t.action)}">${t.action}</td>
+function niceStep(range, targetTicks) {
+  const rough = range / targetTicks;
+  const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+  const frac = rough / mag;
+  let nice;
+  if (frac <= 1.5) nice = 1;
+  else if (frac <= 3.5) nice = 2;
+  else if (frac <= 7.5) nice = 5;
+  else nice = 10;
+  return nice * mag;
+}
+
+function drawGravityChart() {
+  const canvas = document.getElementById('gravity-canvas');
+  if (!canvas) return;
+  const container = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  if (w === 0 || h === 0) return;
+
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const pad = { top: 12, right: 52, bottom: 24, left: 8 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  if (plotW < 40 || plotH < 40) return;
+
+  const now = Date.now() / 1000;
+  const tMin = now - PRICE_WINDOW;
+  const tMax = now + 20 * 60;
+
+  // Price domain: union of priceBuffer and predictions
+  let pMin = Infinity, pMax = -Infinity;
+  for (const t of priceBuffer) {
+    if (t.markPrice < pMin) pMin = t.markPrice;
+    if (t.markPrice > pMax) pMax = t.markPrice;
+  }
+  for (const p of predictions) {
+    if (p.targetPrice < pMin) pMin = p.targetPrice;
+    if (p.targetPrice > pMax) pMax = p.targetPrice;
+    if (p.entryPrice) {
+      if (p.entryPrice < pMin) pMin = p.entryPrice;
+      if (p.entryPrice > pMax) pMax = p.entryPrice;
+    }
+  }
+  if (!isFinite(pMin)) { pMin = 0; pMax = 100; }
+  const pPad = (pMax - pMin) * 0.02 || 1;
+  pMin -= pPad;
+  pMax += pPad;
+
+  const tToX = t => pad.left + ((t - tMin) / (tMax - tMin)) * plotW;
+  const pToY = p => pad.top + (1 - (p - pMin) / (pMax - pMin)) * plotH;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Plot background
+  ctx.fillStyle = '#161b22';
+  ctx.fillRect(pad.left, pad.top, plotW, plotH);
+
+  // Price grid lines + Y labels
+  const pStep = niceStep(pMax - pMin, 5);
+  ctx.font = '10px SF Mono, monospace';
+  ctx.textAlign = 'right';
+  let pTick = Math.ceil(pMin / pStep) * pStep;
+  while (pTick <= pMax) {
+    const y = pToY(pTick);
+    ctx.strokeStyle = '#21262d';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(pad.left + plotW, y);
+    ctx.stroke();
+    ctx.fillStyle = '#8b949e';
+    ctx.fillText('$' + pTick.toFixed(pStep < 1 ? 2 : 0), w - 4, y + 3);
+    pTick += pStep;
+  }
+
+  // Time grid + X labels
+  ctx.textAlign = 'center';
+  const tStep = (tMax - tMin) < 600 ? 60 : (tMax - tMin) < 3600 ? 300 : 600;
+  let tTick = Math.ceil(tMin / tStep) * tStep;
+  while (tTick <= tMax) {
+    const x = tToX(tTick);
+    ctx.strokeStyle = '#21262d';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, pad.top);
+    ctx.lineTo(x, pad.top + plotH);
+    ctx.stroke();
+    const d = new Date(tTick * 1000);
+    ctx.fillStyle = '#6e7681';
+    ctx.fillText(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), x, h - 4);
+    tTick += tStep;
+  }
+
+  // NOW dashed line
+  const nowX = tToX(now);
+  ctx.save();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = '#58a6ff';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(nowX, pad.top);
+  ctx.lineTo(nowX, pad.top + plotH);
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = '#58a6ff';
+  ctx.font = '9px SF Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('NOW', nowX, pad.top - 1);
+
+  // Price line (white)
+  if (priceBuffer.length > 1) {
+    ctx.strokeStyle = '#e6edf3';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let started = false;
+    for (const t of priceBuffer) {
+      const x = tToX(t.timestamp);
+      const y = pToY(t.markPrice);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Entry→target connecting lines (drawn first so circles render on top)
+  for (const p of predictions) {
+    if (!p.entryPrice || !p.entryTime) continue;
+    const x1 = tToX(p.entryTime);
+    const y1 = pToY(p.entryPrice);
+    const x2 = tToX(p.expiryTime);
+    const y2 = pToY(p.targetPrice);
+    // Clip to plot area
+    if (x2 < pad.left || x2 > pad.left + plotW) continue;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(pad.left, pad.top, plotW, plotH);
+    ctx.clip();
+    ctx.strokeStyle = p.expired ? 'rgba(88,166,255,0.15)' : 'rgba(88,166,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    // Small dot at entry point
+    ctx.beginPath();
+    ctx.arc(x1, y1, 2, 0, Math.PI * 2);
+    ctx.fillStyle = p.expired ? 'rgba(88,166,255,0.20)' : 'rgba(88,166,255,0.50)';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Prediction circles
+  // Size = confCalib (higher confidence+calibration = bigger gravity pull)
+  // Radius: confCalib 0→6px, 1→24px
+  for (const p of predictions) {
+    const x = tToX(p.expiryTime);
+    const y = pToY(p.targetPrice);
+    if (x < pad.left || x > pad.left + plotW) continue;
+    if (y < pad.top || y > pad.top + plotH) continue;
+
+    const cc = Math.max(0, Math.min(1, p.confCalib));
+    const r = 6 + cc * 18;
+    const isLong = p.direction === 'long';
+
+    if (p.expired) {
+      // Expired: grey circle, same size as when active
+      const grey = '110,118,129';
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${grey},0.20)`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(${grey},0.40)`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Outcome marker: fixed 12px font, doesn't scale with circle
+      if (p.outcome) {
+        const isHit = p.outcome === 'HIT';
+        const marker = isHit ? '+' : '\u00d7';
+        const markerColor = isHit ? '#3fb950' : '#f85149';
+        ctx.fillStyle = markerColor;
+        ctx.font = 'bold 12px SF Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(marker, x, y);
+        ctx.textBaseline = 'alphabetic';
+      }
+    } else {
+      // Active: colored circle, opacity from quality score
+      const rgb = isLong ? '63,185,80' : '248,81,73';
+      const qs = Math.max(0, Math.min(1, p.qualityScore));
+      // Quality 0→0.3 opacity, 1→1.0 opacity (always somewhat visible)
+      const alpha = 0.3 + qs * 0.7;
+
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${rgb},${alpha.toFixed(2)})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(${rgb},${Math.min(1, alpha + 0.2).toFixed(2)})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      if (r >= 10) {
+        ctx.fillStyle = `rgba(255,255,255,${Math.min(1, alpha + 0.1).toFixed(2)})`;
+        ctx.font = '8px SF Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.horizon, x, y + 3);
+      }
+    }
+  }
+
+  // Plot border
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad.left, pad.top, plotW, plotH);
+}
+
+function updateBudgetBar(id, spend, limit) {
+  const pct = limit > 0 ? (spend / limit) * 100 : 0;
+  const el = document.getElementById(id);
+  el.style.width = Math.min(pct, 100) + '%';
+  el.className = 'budget-fill' + (pct > 80 ? ' danger' : pct > 50 ? ' warn' : '');
+}
+
+function updateReflection(data) {
+  if (!data) return;
+  const sumEl = document.getElementById('refl-summary');
+  if (data.summary) {
+    sumEl.textContent = data.summary;
+    sumEl.style.display = 'block';
+  }
+}
+
+// ── Horizon popover ──
+function toggleHzPopover(e) {
+  e.stopPropagation();
+  document.getElementById('hz-popover').classList.toggle('open');
+}
+
+function updateHzFilter() {
+  const checked = [...document.querySelectorAll('#hz-popover input:checked')].map(el => el.value);
+  document.getElementById('hz-btn').textContent = checked.length ? checked.join('|') : 'All';
+  renderAvailable();
+}
+
+document.addEventListener('click', (e) => {
+  const pop = document.getElementById('hz-popover');
+  if (pop && !pop.contains(e.target) && e.target.id !== 'hz-btn') {
+    pop.classList.remove('open');
+  }
+});
+
+// ── Available signals with filters ──
+function renderAvailable() {
+  const signals = state.availableSignals || [];
+  const checkedHz = [...document.querySelectorAll('#hz-popover input:checked')].map(el => el.value);
+  const fQuality = parseFloat(document.getElementById('f-quality').value) || 0;
+  const fWinRate = parseFloat(document.getElementById('f-winrate').value) || 0;
+  const fConfCalib = parseFloat(document.getElementById('f-confcalib').value) || 0;
+  const fMaker = document.getElementById('f-maker').value.toLowerCase();
+
+  const filtered = signals.filter(s => {
+    if (checkedHz.length && !checkedHz.includes(s.horizon)) return false;
+    if (s.quality < fQuality) return false;
+    if (s.winRate < fWinRate) return false;
+    if (s.confCalib < fConfCalib) return false;
+    if (fMaker && !(s.maker || '').toLowerCase().includes(fMaker) && !(s.makerFull || '').toLowerCase().includes(fMaker)) return false;
+    return true;
+  });
+
+  document.getElementById('avail-count').textContent = filtered.length + ' signal' + (filtered.length !== 1 ? 's' : '') + (filtered.length > 50 ? ' (top 50)' : '');
+
+  const tbody = document.getElementById('avail-body');
+  tbody.innerHTML = filtered.slice(0, 50).map(s => {
+    const ccClass = s.confCalib >= 0.3 ? 'pnl-positive' : s.confCalib >= 0.15 ? '' : 'pnl-negative';
+    return `<tr>
+      <td class="mono-cell" title="${s.commitmentHash || ''}" style="cursor:pointer;text-decoration:underline;" onclick="showSignalDetail('${s.commitmentHash}')">${shortHash(s.commitmentHash)}</td>
+      <td>${fmtExpiry(s.expiresIn)}</td>
+      <td>${s.horizon || '--'}</td>
+      <td title="${s.makerFull || ''}">${s.maker || '--'}</td>
+      <td>$${(s.cost || 0).toFixed(2)}</td>
+      <td>${(s.confidence * 100).toFixed(0)}%</td>
+      <td class="${ccClass}">${s.confCalib.toFixed(3)}</td>
+      <td>${s.signalType || '--'}</td>
+      <td>${s.quality.toFixed(2)}</td>
+      <td>${(s.winRate * 100).toFixed(0)}%</td>
+      <td>${s.calibration.toFixed(2)}</td>
+      <td>${boughtHashes.has(s.commitmentHash)
+        ? '<button class="buy-btn bought" disabled>Bought</button>'
+        : `<button class="buy-btn" onclick="buySignal('${s.commitmentHash}', this)">Buy</button>`}</td>
+    </tr>`;
+  }).join('');
+}
+
+function fmtExpiry(secs) {
+  if (!secs || secs <= 0) return 'expired';
+  if (secs < 60) return secs + 's';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+  return Math.floor(secs / 3600) + 'h ' + Math.floor((secs % 3600) / 60) + 'm';
+}
+
+// ── Load purchases and trades ──
+function renderPurchases(data) {
+  const tbody = document.getElementById('purchases-body');
+  tbody.innerHTML = data.slice(0, 20).map(p => {
+    const hasError = p.error && !p.delivered;
+    const status = p.delivered ? 'Delivered' : p.error ? 'Failed' : 'Pending';
+    const outcome = p.outcome || '';
+    const outcomeClass = outcome === 'HIT' ? 'pnl-positive' : outcome === 'MISS' ? 'pnl-negative' : outcome === 'DEFAULT' ? 'pnl-negative' : '';
+    const outcomeLabel = outcome || (status === 'Delivered' ? 'Pending' : '');
+    const cc = p.conf_calib || (p.confidence || 0) * (p.calibration || 0);
+    const ccClass = cc >= 0.3 ? 'pnl-positive' : cc >= 0.15 ? '' : 'pnl-negative';
+    return `<tr>
+    <td class="mono-cell" title="${p.commitment_hash || ''}" style="cursor:pointer;text-decoration:underline;" onclick="showSignalDetail('${p.commitment_hash}')">${shortHash(p.commitment_hash)}</td>
+    <td>${p.expiry_time ? fmtExpiry(Math.round(p.expiry_time - Date.now() / 1000)) : '--'}</td>
+    <td>${p.horizon || '--'}</td>
+    <td>${p.maker || '--'}</td>
+    <td>$${(p.cost || 0).toFixed(2)}</td>
+    <td>${((p.confidence || 0) * 100).toFixed(0)}%</td>
+    <td class="${ccClass}">${cc ? cc.toFixed(3) : '--'}</td>
+    <td>${p.signal_type || '--'}</td>
+    <td class="${p.direction === 0 || p.direction === '0' || p.direction === 'long' ? 'pnl-positive' : p.direction === 1 || p.direction === '1' || p.direction === 'short' ? 'pnl-negative' : ''}">${p.direction === 0 || p.direction === '0' || p.direction === 'long' ? 'LONG' : p.direction === 1 || p.direction === '1' || p.direction === 'short' ? 'SHORT' : (p.direction || '--')}</td>
+    <td>${p.target_price ? '$' + fmtNum(p.target_price, 2) : '--'}</td>
+    <td class="${outcomeClass}">${outcomeLabel}</td>
+    <td class="pnl-negative error-cell" title="${p.error || ''}">${hasError ? p.error : ''}</td>
+  </tr>`;
+  }).join('');
+}
+
+async function loadPurchases() {
+  try {
+    const resp = await fetch('/api/agdel/purchases');
+    const data = await resp.json();
+    renderPurchases(data);
+  } catch (e) {}
+}
+
+async function loadTrades() {
+  try {
+    const resp = await fetch('/api/trades');
+    const data = await resp.json();
+    const tbody = document.getElementById('trades-body');
+    tbody.innerHTML = data.slice(0, 20).map(t => `<tr>
+      <td>${fmtTime(t.timestamp)}</td>
+      <td>${(t.action || '').replace(/_/g, ' ')}</td>
       <td>${(t.size || 0).toFixed(4)}</td>
-      <td>$${(t.price || 0).toFixed(2)}</td>
-      <td class="${t.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">$${(t.pnl || 0).toFixed(4)}</td>
+      <td>$${fmtNum(t.price || 0, 2)}</td>
+      <td class="${t.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">$${fmtNum(t.pnl || 0, 4)}</td>
+      <td>$${fmtNum(t.fee || 0, 4)}</td>
     </tr>`).join('');
-  }).catch(() => {});
+  } catch (e) {}
+}
+
+async function loadReflection() {
+  try {
+    const resp = await fetch('/api/reflection/history');
+    const data = await resp.json();
+    const st = data.status || {};
+    document.getElementById('refl-status').textContent = st.enabled ? 'Enabled' : 'Disabled';
+    document.getElementById('refl-last').textContent = st.lastRunAt ? timeAgo(st.lastRunAt) : 'Never';
+    const nextIn = st.nextRunAt ? Math.max(0, Math.round(st.nextRunAt - Date.now() / 1000)) : 0;
+    document.getElementById('refl-next').textContent = nextIn > 0 ? nextIn + 's' : '--';
+
+    if (st.latestSummary) {
+      const sumEl = document.getElementById('refl-summary');
+      sumEl.textContent = st.latestSummary;
+      sumEl.style.display = 'block';
+    }
+
+    // Show applied params
+    if (st.latestApplied && st.latestApplied.length) {
+      document.getElementById('refl-params').innerHTML = '<table class="data-table param-table"><tbody>' +
+        st.latestApplied.map(a =>
+          `<tr><td>${a.param_key}</td><td>${a.old_value} → ${a.new_value}</td></tr>`
+        ).join('') + '</tbody></table>';
+    }
+  } catch (e) {}
+}
+
+// ── Manual buy ──
+const boughtHashes = new Set();
+
+async function buySignal(commitmentHash, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  boughtHashes.add(commitmentHash);
+  try {
+    const resp = await fetch('/api/agdel/buy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commitment_hash: commitmentHash }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      btn.textContent = 'Bought';
+      btn.className = 'buy-btn bought';
+      loadPurchases();
+    } else {
+      btn.textContent = 'Fail';
+      btn.className = 'buy-btn failed';
+      btn.title = data.error || 'Unknown error';
+      boughtHashes.delete(commitmentHash);
+      setTimeout(() => { btn.textContent = 'Buy'; btn.className = 'buy-btn'; btn.disabled = false; }, 5000);
+    }
+  } catch (e) {
+    btn.textContent = 'Err';
+    btn.className = 'buy-btn failed';
+    boughtHashes.delete(commitmentHash);
+    setTimeout(() => { btn.textContent = 'Buy'; btn.className = 'buy-btn'; btn.disabled = false; }, 3000);
+  }
+}
+
+// ── Direct close position ──
+async function closePosition() {
+  const btn = document.getElementById('close-pos-btn');
+  if (!confirm('Close your entire HL position?')) return;
+  btn.disabled = true;
+  btn.textContent = 'Closing...';
+  try {
+    const resp = await fetch('/api/close', { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+      btn.textContent = 'Closed';
+    } else {
+      btn.textContent = 'Failed';
+      btn.title = data.error || 'Unknown error';
+      setTimeout(() => { btn.textContent = 'Close Position'; btn.disabled = false; }, 5000);
+    }
+  } catch (e) {
+    btn.textContent = 'Error';
+    setTimeout(() => { btn.textContent = 'Close Position'; btn.disabled = false; }, 3000);
+  }
+}
+
+// ── Trade approve/reject ──
+async function approveTrade() {
+  const btn = document.getElementById('approve-btn');
+  btn.disabled = true;
+  btn.textContent = 'Executing...';
+  try {
+    const resp = await fetch('/api/approve', { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+      btn.textContent = 'Executed';
+      loadTrades();
+    } else {
+      btn.textContent = 'Failed';
+      btn.title = data.error || 'Unknown error';
+      setTimeout(() => { btn.disabled = false; }, 3000);
+    }
+  } catch (e) {
+    btn.textContent = 'Error';
+    setTimeout(() => { btn.disabled = false; }, 3000);
+  }
+}
+
+async function rejectTrade() {
+  try {
+    await fetch('/api/reject', { method: 'POST' });
+  } catch (e) {}
+}
+
+// ── Mode toggle ──
+async function toggleMode() {
+  const current = state.tradingMode || 'paper';
+  const next = current === 'paper' ? 'live' : 'paper';
+
+  if (next === 'live') {
+    if (!confirm('Switch to LIVE trading? Real orders will be placed on Hyperliquid.')) return;
+  }
+
+  try {
+    const resp = await fetch('/api/config/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: next }),
+    });
+    if (resp.ok) {
+      state.tradingMode = next;
+      updateDashboard(state);
+    }
+  } catch (e) { console.error('Toggle failed:', e); }
+}
+
+// ── Helpers ──
+function fmtNum(n, dec) { return Number(n || 0).toFixed(dec); }
+function truncate(s, len) { return s && s.length > len ? s.slice(0, len) + '...' : s || ''; }
+function shortHash(h) { return h ? h.slice(0, 6) + '..' + h.slice(-4) : '--'; }
+
+function fmtTime(ts) {
+  if (!ts) return '--';
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function timeAgo(ts) {
+  if (!ts) return '--';
+  const secs = Math.round(Date.now() / 1000 - ts);
+  if (secs < 60) return secs + 's ago';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+  return Math.floor(secs / 3600) + 'h ago';
 }
 
 function setPnl(id, val) {
   const el = document.getElementById(id);
-  el.textContent = '$' + (val || 0).toFixed(4);
-  el.className = val >= 0 ? 'pnl-positive' : 'pnl-negative';
+  el.textContent = '$' + fmtNum(val, 4);
+  el.className = 'stat-value ' + (val >= 0 ? 'pnl-positive' : 'pnl-negative');
 }
 
-function setBudgetBar(id, spend, limit) {
+function setStateClass(id, state) {
   const el = document.getElementById(id);
-  const pct = limit > 0 ? Math.min((spend || 0) / limit * 100, 100) : 0;
-  el.style.width = pct + '%';
-  el.className = 'budget-fill' + (pct > 80 ? ' danger' : pct > 50 ? ' warn' : '');
+  el.textContent = state;
+  el.className = 'stat-value signal-state state-' + state;
 }
 
 function actionColor(action) {
-  if (!action) return 'var(--text-muted)';
+  if (!action || action === 'hold') return 'var(--text-muted)';
   if (action.includes('long') || action === 'increase') return 'var(--green)';
   if (action.includes('short')) return 'var(--red)';
   if (action === 'close') return 'var(--yellow)';
-  return 'var(--text-muted)';
+  if (action.includes('decrease') || action.includes('reduce')) return 'var(--orange)';
+  if (action.includes('flip')) return 'var(--purple)';
+  return 'var(--text-primary)';
 }
 
-function timeAgo(ts) {
-  const s = Math.floor(Date.now() / 1000 - ts);
-  if (s < 60) return s + 's ago';
-  return Math.floor(s / 60) + 'm ago';
+// ── Signal detail modal ──
+function mapDir(d) {
+  // AGDEL protocol: 0 = long, 1 = short
+  if (d === 0 || d === '0' || d === 'long') return 'LONG';
+  if (d === 1 || d === '1' || d === 'short') return 'SHORT';
+  return d || '--';
 }
 
-async function approveTrade() {
-  document.getElementById('btn-approve').disabled = true;
-  document.getElementById('btn-reject').disabled = true;
+async function showSignalDetail(commitmentHash) {
+  const modal = document.getElementById('signal-modal');
+  const body = document.getElementById('modal-body');
+  document.getElementById('modal-title').textContent = commitmentHash;
+  body.innerHTML = '<div class="modal-loading">Loading...</div>';
+  modal.classList.add('open');
+
   try {
-    const r = await fetch('/api/approve', { method: 'POST' });
-    const data = await r.json();
-    if (!data.ok) alert('Approve failed: ' + (data.error || 'unknown'));
-  } catch(e) { alert('Error: ' + e); }
+    const resp = await fetch(`/api/agdel/signal/${commitmentHash}`);
+    const data = await resp.json();
+    const local = data.local || {};
+    const agdel = data.agdel || {};
+    const hasLocal = Object.keys(local).length > 0;
+    const hasAgdel = Object.keys(agdel).length > 0;
+
+    let html = '';
+
+    // Side-by-side comparison for key fields
+    if (hasLocal || hasAgdel) {
+      html += '<div class="modal-section"><div class="modal-section-title">Comparison (Local vs AGDEL)</div>';
+      const fields = [
+        ['Status', hasLocal ? (local.delivered ? 'Delivered' : local.error ? 'Failed' : 'Pending') : '--', agdel.status || '--'],
+        ['Direction', mapDir(local.direction), mapDir(agdel.direction)],
+        ['Target Price', local.target_price ? '$' + fmtNum(local.target_price, 2) : '--', agdel.target_price ? '$' + fmtNum(agdel.target_price, 2) : '--'],
+        ['Confidence', local.confidence ? (local.confidence * 100).toFixed(1) + '%' : '--', agdel.confidence ? (Number(agdel.confidence) * 100).toFixed(1) + '%' : '--'],
+        ['Outcome', local.outcome || '--', agdel.outcome || agdel.status || '--'],
+        ['Quality Score', local.quality_score != null ? local.quality_score : '--', agdel.quality_score != null ? agdel.quality_score : '--'],
+        ['Resolution Price', local.resolution_price ? '$' + fmtNum(local.resolution_price, 2) : '--', agdel.resolution_price ? '$' + fmtNum(agdel.resolution_price, 2) : '--'],
+      ];
+      html += '<table class="data-table" style="font-size:11px;"><thead><tr><th>Field</th><th>Local</th><th>AGDEL</th><th></th></tr></thead><tbody>';
+      for (const [label, lv, av] of fields) {
+        const lvStr = String(lv), avStr = String(av);
+        const same = lvStr === avStr || lvStr === '--' || avStr === '--';
+        const icon = !same ? '<span class="pnl-negative" style="font-weight:700;">!=</span>' : '';
+        html += `<tr><td style="color:var(--text-secondary)">${label}</td><td>${lvStr}</td><td>${avStr}</td><td>${icon}</td></tr>`;
+      }
+      html += '</tbody></table></div>';
+    }
+
+    // Local purchase data
+    if (hasLocal) {
+      html += '<div class="modal-section"><div class="modal-section-title">Local Purchase Data</div>';
+      for (const [k, v] of Object.entries(local)) {
+        let display = v;
+        if (k === 'purchased_at' && v) display = new Date(v * 1000).toLocaleString();
+        else if (k === 'direction') display = mapDir(v);
+        else if (typeof v === 'number') display = v;
+        else if (v === null || v === undefined) display = '--';
+        html += `<div class="modal-row"><span class="modal-key">${k}</span><span class="modal-val">${display}</span></div>`;
+      }
+      html += '</div>';
+    }
+
+    // AGDEL API data
+    if (hasAgdel) {
+      html += '<div class="modal-section"><div class="modal-section-title">AGDEL API Data</div>';
+      for (const [k, v] of Object.entries(agdel)) {
+        let display = v;
+        if ((k === 'created_at' || k === 'expiry_time' || k === 'revealed_at') && v) {
+          display = new Date(typeof v === 'number' && v < 1e12 ? v * 1000 : v).toLocaleString();
+        } else if (k === 'direction') display = mapDir(v);
+        else if (typeof v === 'object' && v !== null) display = JSON.stringify(v);
+        else if (v === null || v === undefined) display = '--';
+        html += `<div class="modal-row"><span class="modal-key">${k}</span><span class="modal-val">${display}</span></div>`;
+      }
+      html += '</div>';
+    }
+
+    if (data.agdel_error) {
+      html += `<div class="modal-section"><div class="modal-section-title">AGDEL Error</div><div class="pnl-negative" style="font-family:var(--font-mono);font-size:11px;">${data.agdel_error}</div></div>`;
+    }
+
+    if (!hasLocal && !hasAgdel) {
+      html = '<div class="modal-loading">No data found for this signal.</div>';
+    }
+
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div class="modal-loading pnl-negative">Error: ${e.message}</div>`;
+  }
 }
 
-async function rejectTrade() {
-  document.getElementById('btn-approve').disabled = true;
-  document.getElementById('btn-reject').disabled = true;
-  try { await fetch('/api/reject', { method: 'POST' }); } catch(e) {}
+function closeModal() {
+  document.getElementById('signal-modal').classList.remove('open');
 }
 
-async function toggleMode() {
-  const current = state.tradingMode || 'paper';
-  const next = current === 'paper' ? 'live' : 'paper';
-  if (next === 'live' && !confirm('Switch to LIVE mode? Real orders will be placed!')) return;
-  await fetch('/api/config/mode', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mode: next}) });
-}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-async function buySignal(hash, btn) {
-  btn.disabled = true;
-  btn.textContent = '...';
-  try {
-    const r = await fetch('/api/agdel/buy', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({commitment_hash: hash}) });
-    const data = await r.json();
-    if (data.ok) { btn.textContent = 'OK'; btn.style.color = 'var(--green)'; }
-    else { btn.textContent = 'FAIL'; btn.style.color = 'var(--red)'; btn.title = data.error; }
-  } catch(e) { btn.textContent = 'ERR'; btn.style.color = 'var(--red)'; }
-}
-
+// ── Init ──
 connectWS();
+setInterval(loadPurchases, 15000);
+setInterval(loadTrades, 10000);
+setInterval(loadReflection, 30000);
+loadPurchases();
+loadTrades();
+loadReflection();
+
+// Load initial tick history and predictions for gravity chart
+(async () => {
+  try {
+    const [tickResp, predResp] = await Promise.all([
+      fetch('/api/ticks'), fetch('/api/predictions')
+    ]);
+    const ticks = await tickResp.json();
+    const preds = await predResp.json();
+    priceBuffer = ticks || [];
+    predictions = preds || [];
+    drawGravityChart();
+  } catch (e) { console.error('Gravity init error:', e); }
+})();
+
+// Resize listener for responsive chart
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(drawGravityChart, 100);
+});
 </script>
 </body>
 </html>

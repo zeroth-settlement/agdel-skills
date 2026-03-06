@@ -370,13 +370,26 @@ def passes_evaluation(reputation, criteria):
 
 ### Purchase Issues
 
+**Before your first purchase, verify all three wallet prerequisites are met:**
+
+1. **HYPE for gas** — the buyer wallet needs HYPE on HyperEVM (chain 999) to pay transaction fees. Even the USDC approval transaction requires gas. Without HYPE, every on-chain call fails with `insufficient funds for intrinsic transaction cost`. Send at least 0.05 HYPE to the buyer wallet. You can transfer from another wallet on HyperEVM or bridge from Hyperliquid L1.
+
+2. **USDC balance** — the buyer wallet needs USDC (contract `0xb88339cb7199b77e23db6e890353e22632ba630f`) on HyperEVM to cover signal costs. Signal costs are denominated in USDC (often micro-amounts like 0.02-2.00 USDC). Check balance via the dashboard or RPC `eth_call` to the USDC contract's `balanceOf`.
+
+3. **USDC allowance** — the marketplace contract (`0x1779255c0AcDe950095C9E872B2fAD06CFB88D4c`) must have USDC spending approval. The MCP server attempts to set this automatically on the first purchase, but this itself requires HYPE for gas (see #1).
+
+**Common error messages:**
+
 | Symptom | Fix |
 |---------|-----|
-| Purchase fails with insufficient balance | Ensure buyer wallet has USDC on HyperEVM (chain 999). |
+| `insufficient funds for intrinsic transaction cost` with `have 0 want ...` | Buyer wallet has zero HYPE. Send HYPE to the buyer address on HyperEVM chain 999. This is the most common first-setup issue. |
+| `insufficient funds for gas * price + value` | Same as above — wallet lacks HYPE for gas fees. |
+| Purchase fails with insufficient USDC balance | Buyer wallet needs USDC on HyperEVM (chain 999). Bridge or transfer USDC to the buyer address. |
 | Purchase fails with `CommitmentAlreadyUsed` | Another buyer created the on-chain signal. Retry purchase — it will use `buySignal` path. |
 | Purchase blocked near expiry | Buying is disabled 15 seconds before expiry. Choose signals with more time remaining. |
-| `insufficient funds for gas` | Send ~0.01 HYPE to buyer wallet on HyperEVM chain 999. |
-| USDC allowance error | Set USDC approval for the marketplace contract (`0x1779255c0AcDe950095C9E872B2fAD06CFB88D4c`). |
+| USDC allowance error / `ERC20: insufficient allowance` | Set USDC approval for the marketplace contract. The MCP server tries this automatically but it requires HYPE for gas. |
+| Purchase returns 400 but button briefly shows "Bought" | The dashboard optimistically updates the button. Check the error in the purchase log or server logs. Common cause: gas or USDC issues above. |
+| `tx_hash is required` | You may be using the published `agdel-mcp` npm package which requires the caller to submit the on-chain tx. Use the local dev MCP server (`npx tsx mcp/server.ts` from the agdel monorepo root with `AGDEL_ONCHAIN=1`) which handles on-chain submission internally. |
 
 ### Delivery Issues
 

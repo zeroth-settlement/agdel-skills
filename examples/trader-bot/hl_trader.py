@@ -241,7 +241,10 @@ class HLTrader:
 
     async def execute(self, action: str, size_pct: float, mark_price: float) -> TradeResult | None:
         """Execute a trade action. Returns None if action is hold."""
-        if action == "hold" or size_pct <= 0:
+        if action == "hold":
+            return None
+        # Close/flip actions don't need a size — they operate on the existing position
+        if size_pct <= 0 and action not in ("close", "flip_long", "flip_short"):
             return None
 
         if self.mode == "paper":
@@ -384,14 +387,22 @@ class HLTrader:
                                    price=mark_price, error=f"Unknown action: {action}")
 
             # Parse SDK result
-            status = result.get("status", "")
+            if result is None:
+                logger.error("Live trade returned None for %s", action)
+                return TradeResult(success=False, action=action, size=size,
+                                   price=mark_price, error="SDK returned None")
+            logger.info("Live trade raw result for %s: %s", action, str(result)[:200])
+            if isinstance(result, dict):
+                status = result.get("status", "")
+            else:
+                status = str(result)
             if status == "ok":
                 fee = notional * TAKER_FEE_PCT
                 logger.info("Live trade: %s size=%.4f price=%.2f", action, size, mark_price)
                 return TradeResult(success=True, action=action, size=size,
                                    price=mark_price, fee=fee)
             else:
-                err = result.get("response", str(result))
+                err = result.get("response", str(result)) if isinstance(result, dict) else str(result)
                 logger.error("Live trade failed: %s", err)
                 return TradeResult(success=False, action=action, size=size,
                                    price=mark_price, error=str(err))

@@ -135,6 +135,8 @@ async def _run_tick():
             "hlEquity": portfolio.get("equity", 0),
             "hlAvailable": portfolio.get("availableBalance", 0),
         },
+        "predictions": _build_predictions(),
+        "purchases": list(agdel_buyer.purchase_log) if agdel_buyer else [],
     }
 
     latest_state = state
@@ -175,6 +177,7 @@ async def agdel_poll_loop():
             if purchased:
                 logger.info("AGDEL: purchased %d signals", len(purchased))
             await agdel_buyer.check_stale_deliveries()
+            await agdel_buyer.check_outcomes()
         except Exception as e:
             logger.error("AGDEL poll error: %s", e)
         await asyncio.sleep(interval)
@@ -227,11 +230,73 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+def _price_at_time(ts: float) -> float | None:
+    """Find the closest tick price to a given timestamp."""
+    if not ts or not tick_history:
+        return None
+    best = None
+    best_delta = float("inf")
+    for tick in tick_history:
+        delta = abs(tick["timestamp"] - ts)
+        if delta < best_delta:
+            best_delta = delta
+            best = tick["markPrice"]
+    return best
+
+
+def _build_predictions() -> list[dict]:
+    """Build prediction list from purchase_log for the gravity chart."""
+    now = time.time()
+    preds = []
+    if not agdel_buyer:
+        return preds
+    for entry in agdel_buyer.purchase_log:
+        if not entry.get("delivered"):
+            continue
+        tp = entry.get("target_price")
+        if not tp:
+            continue
+        expiry = entry.get("expiry_time", 0)
+        if expiry and expiry < now - 30 * 60:
+            continue
+        d = entry.get("direction")
+        direction = "long" if d in (0, "0", "long") else "short" if d in (1, "1", "short") else str(d)
+        expired = bool(expiry and expiry < now)
+        outcome = entry.get("outcome", "")
+        purchased_at = float(entry.get("purchased_at", 0) or 0)
+        created_at = float(entry.get("created_at", 0) or 0)
+        raw_entry = entry.get("entry_price")
+        if raw_entry is not None:
+            ep = float(raw_entry)
+            entry_price = ep / 1e8 if ep > 1e6 else ep
+        else:
+            entry_price = _price_at_time(purchased_at) if purchased_at else None
+        preds.append({
+            "targetPrice": float(tp),
+            "expiryTime": float(expiry),
+            "direction": direction,
+            "confCalib": float(entry.get("conf_calib", 0)),
+            "qualityScore": float(entry.get("quality_score", 0.5)),
+            "horizon": entry.get("horizon", ""),
+            "hash": entry.get("commitment_hash", "")[:10],
+            "expired": expired,
+            "outcome": outcome,
+            "entryTime": created_at or purchased_at,
+            "entryPrice": entry_price,
+        })
+    return preds
+
+
 # ── Routes ───────────────────────────────────────────────────────────
 
 @app.get("/")
 async def dashboard():
     return FileResponse("dashboard.html", media_type="text/html")
+
+
+@app.get("/dashboard.css")
+async def dashboard_css():
+    return FileResponse("dashboard.css", media_type="text/css")
 
 
 @app.websocket("/ws")
@@ -293,6 +358,25 @@ async def approve_trade():
         return JSONResponse({"ok": False, "error": error}, status_code=500)
 
 
+@app.post("/api/close")
+async def close_position():
+    """Directly close the HL position regardless of matrix state."""
+    if not hl_trader:
+        return JSONResponse({"ok": False, "error": "Trader not ready"}, status_code=503)
+    if hl_trader.mode != "live":
+        return JSONResponse({"ok": False, "error": "Not in live mode"}, status_code=400)
+    mark_price = await hl_trader.get_mark_price()
+    result = await hl_trader.execute("close", 0, mark_price)
+    if result and result.success:
+        trade_history.appendleft(result.to_dict())
+        logger.info("Direct CLOSE executed")
+        return JSONResponse({"ok": True, "trade": result.to_dict()})
+    else:
+        error = result.error if result else "close failed"
+        logger.error("Direct close failed: %s", error)
+        return JSONResponse({"ok": False, "error": error}, status_code=500)
+
+
 @app.post("/api/reject")
 async def reject_trade():
     """Human rejects the pending matrix recommendation."""
@@ -302,6 +386,20 @@ async def reject_trade():
     logger.info("Trade REJECTED: %s", pending_approval["action"])
     pending_approval = None
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/ticks")
+async def get_ticks():
+    """Return tick_history as [{timestamp, markPrice}] in chronological order."""
+    ticks = [{"timestamp": t["timestamp"], "markPrice": t["markPrice"]} for t in tick_history]
+    ticks.reverse()
+    return JSONResponse(ticks)
+
+
+@app.get("/api/predictions")
+async def get_predictions():
+    """Return active delivered predictions from purchase_log."""
+    return JSONResponse(_build_predictions())
 
 
 @app.get("/api/trades")
@@ -327,10 +425,26 @@ async def get_purchases():
 async def agdel_webhook_delivery(body: dict):
     if not agdel_buyer:
         return JSONResponse({"ok": False}, status_code=503)
-    if body.get("event") != "delivery":
+    event = body.get("event", "")
+    logger.info("Webhook POST: event=%s hash=%s maker=%s",
+                event, body.get("commitment_hash", "")[:12],
+                body.get("maker_address", "")[:12])
+    if event == "delivery":
+        signal = await agdel_buyer.handle_webhook_delivery(body)
+        if signal:
+            logger.info("Webhook delivery processed: %s %s", signal.get("horizon"), signal.get("direction"))
+        else:
+            logger.warning("Webhook delivery not matched (pending=%d): %s",
+                          len(agdel_buyer._pending_deliveries),
+                          body.get("commitment_hash", "")[:12])
+        return JSONResponse({"ok": True, "delivered": signal is not None})
+    elif event == "resolution":
+        updated = agdel_buyer.handle_webhook_resolution(body)
+        if updated:
+            await broadcast({"type": "resolution", "commitment_hash": body.get("commitment_hash", ""), "outcome": updated.get("outcome")})
+        return JSONResponse({"ok": True, "resolved": updated is not None})
+    else:
         return JSONResponse({"ok": True, "skipped": True})
-    signal = await agdel_buyer.handle_webhook_delivery(body)
-    return JSONResponse({"ok": True, "delivered": signal is not None})
 
 
 @app.post("/api/agdel/buy")
@@ -342,6 +456,20 @@ async def manual_buy(body: dict):
         return JSONResponse({"ok": False, "error": "Buyer not ready"}, status_code=503)
     result = await agdel_buyer.manual_purchase(commitment_hash)
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+@app.get("/api/agdel/signal/{commitment_hash}")
+async def get_signal_detail(commitment_hash: str):
+    if not agdel_buyer:
+        return JSONResponse({"error": "AGDEL buyer not initialized"}, status_code=503)
+    result = await agdel_buyer.get_signal_detail(commitment_hash)
+    content = json.loads(json.dumps(result, default=str))
+    return JSONResponse(content)
+
+
+@app.get("/api/reflection/history")
+async def get_reflection_history():
+    return JSONResponse({"status": {}, "history": []})
 
 
 @app.post("/api/agdel/budget/reset")
@@ -357,4 +485,4 @@ async def reset_budget():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=9002)
+    uvicorn.run(app, host="0.0.0.0", port=9004)

@@ -214,21 +214,42 @@ class AgdelBuyer:
             from mcp import ClientSession
             from mcp.client.stdio import StdioServerParameters, stdio_client
 
+            server_path = os.environ.get("AGDEL_MCP_PATH", "")
+
             env = {
                 "PATH": os.environ.get("PATH", ""),
                 "HOME": os.environ.get("HOME", ""),
+                "NODE_PATH": os.environ.get("NODE_PATH", ""),
+                "MCP_HEALTH_PORT": "0",
                 "AGDEL_API_URL": self.api_url,
                 "AGDEL_SIGNER_PRIVATE_KEY": (
                     os.environ.get("AGDEL_PRIVATE_KEY")
                     or os.environ.get("TRADERBOT_WALLET_PRIVATE_KEY", "")
                 ),
+                "MARKETPLACE_ADDRESS": os.environ.get(
+                    "AGDEL_MARKETPLACE_ADDRESS", "0x1779255c0AcDe950095C9E872B2fAD06CFB88D4c"
+                ),
+                "AGDEL_RPC_URL": os.environ.get(
+                    "AGDEL_RPC_URL", "https://rpc.hyperliquid.xyz/evm"
+                ),
+                "AGDEL_ONCHAIN": "1",
             }
 
-            params = StdioServerParameters(
-                command="npx",
-                args=["-y", "agdel-mcp"],
-                env=env,
-            )
+            if server_path:
+                # Local dev: run from agdel monorepo root
+                params = StdioServerParameters(
+                    command="npx",
+                    args=["tsx", "mcp/server.ts"],
+                    cwd=server_path,
+                    env=env,
+                )
+            else:
+                # Published package
+                params = StdioServerParameters(
+                    command="npx",
+                    args=["-y", "agdel-mcp"],
+                    env=env,
+                )
 
             self._mcp_context = stdio_client(params)
             read_stream, write_stream = await self._mcp_context.__aenter__()
@@ -362,12 +383,14 @@ class AgdelBuyer:
                 if payload:
                     signal = self._convert_signal(payload, candidate)
                     self.signals[candidate["horizon"]] = signal
-                    self.purchase_log.appendleft({
+                    entry = {
                         "commitment_hash": commitment_hash,
                         "horizon": candidate.get("horizon"),
                         "cost": cost, "purchased_at": time.time(),
-                        "delivered": True, "direction": payload.get("direction"),
-                    })
+                        "delivered": True,
+                    }
+                    self.purchase_log.appendleft(entry)
+                    self._update_purchase_log(commitment_hash, payload)
                     return signal
                 self.purchase_log.appendleft({
                     "commitment_hash": commitment_hash,
@@ -450,15 +473,24 @@ class AgdelBuyer:
             except ValueError:
                 expiry = 0
         duration = expiry - now if expiry else 0
-        horizon = _classify_horizon(duration) or "unknown"
+        horizon = sig.get("horizon_bucket") or _classify_horizon(duration) or "unknown"
         maker = sig.get("maker_address", sig.get("maker", ""))
         raw_cost = float(sig.get("cost_usdc", 0) or 0)
         cost = raw_cost / 1_000_000 if raw_cost > 100 else raw_cost
 
+        rep = sig.get("maker_track_record", {})
+        confidence = float(sig.get("confidence", 0) or 0)
+        calibration = float(rep.get("calibration_score", 0) or 0)
         candidate = {
             "commitment_hash": commitment_hash, "horizon": horizon,
             "cost": cost, "maker": maker,
-            "confidence": float(sig.get("confidence", 0) or 0),
+            "confidence": confidence,
+            "calibration": calibration,
+            "conf_calib": round(confidence * calibration, 4),
+            "signal_type": sig.get("signal_type", ""),
+            "quality_score": float(rep.get("avg_quality_score", rep.get("quality_score", 0)) or 0),
+            "entry_price": sig.get("entry_price"),
+            "created_at": sig.get("created_at"),
         }
 
         try:
@@ -480,6 +512,15 @@ class AgdelBuyer:
             self.purchase_log.appendleft({
                 "commitment_hash": commitment_hash, "horizon": horizon,
                 "cost": cost, "purchased_at": time.time(), "delivered": False,
+                "maker": maker[:12] if maker else "",
+                "confidence": candidate["confidence"],
+                "calibration": candidate["calibration"],
+                "conf_calib": candidate["conf_calib"],
+                "signal_type": candidate["signal_type"],
+                "quality_score": candidate["quality_score"],
+                "entry_price": candidate.get("entry_price"),
+                "created_at": candidate.get("created_at"),
+                "expiry_time": expiry,
             })
 
             if self.webhook_url:
@@ -503,18 +544,18 @@ class AgdelBuyer:
             if payload:
                 signal = self._convert_signal(payload, candidate)
                 self.signals[candidate.get("horizon", "5m")] = signal
-                for entry in self.purchase_log:
-                    if entry.get("commitment_hash") == commitment_hash:
-                        entry["delivered"] = True
-                        entry["direction"] = payload.get("direction")
-                        break
+                self._update_purchase_log(commitment_hash, payload)
         except Exception as e:
             logger.error("Background delivery error: %s", e)
 
     async def handle_webhook_delivery(self, payload: dict) -> dict | None:
         commitment_hash = payload.get("commitment_hash", "")
+        logger.info("Webhook delivery for %s (pending keys: %s)",
+                    commitment_hash[:12],
+                    [k[:12] for k in self._pending_deliveries.keys()])
         pending = self._pending_deliveries.pop(commitment_hash, None)
         if not pending:
+            logger.warning("No pending delivery for %s", commitment_hash[:12])
             return None
         candidate = pending["candidate"]
         envelope = {
@@ -533,11 +574,7 @@ class AgdelBuyer:
             signal = self._convert_signal(decrypted, candidate)
             self.signals[candidate.get("horizon", "5m")] = signal
             self._stats["deliveries"] += 1
-            for entry in self.purchase_log:
-                if entry.get("commitment_hash") == commitment_hash:
-                    entry["delivered"] = True
-                    entry["direction"] = decrypted.get("direction")
-                    break
+            self._update_purchase_log(commitment_hash, decrypted)
             return signal
         except Exception as e:
             logger.error("Webhook decryption failed: %s", e)
@@ -558,16 +595,67 @@ class AgdelBuyer:
                     signal = self._convert_signal(payload, candidate)
                     self.signals[candidate.get("horizon", "5m")] = signal
                     self._pending_deliveries.pop(ch, None)
-                    for entry in self.purchase_log:
-                        if entry.get("commitment_hash") == ch:
-                            entry["delivered"] = True
-                            break
+                    self._update_purchase_log(ch, payload)
             except Exception:
                 pass
 
     async def check_outcomes(self):
-        """Check resolution outcomes for recent purchases."""
-        pass  # Simplified — outcomes visible on dashboard
+        """Poll AGDEL for resolution outcomes on recent purchases."""
+        if not self._mcp_session:
+            return
+        now = time.time()
+        for entry in self.purchase_log:
+            if entry.get("outcome"):
+                continue
+            if not entry.get("delivered"):
+                continue
+            expiry = entry.get("expiry_time", 0)
+            if not expiry or now < expiry:
+                continue
+            # Only check signals expired more than 30s ago (give keeper time)
+            if now - expiry < 30:
+                continue
+            try:
+                sig = await self._call_tool("agdel_market_get_signal", {
+                    "commitment_hash": entry["commitment_hash"],
+                })
+                if isinstance(sig, dict):
+                    status = sig.get("status", "")
+                    if status in ("resolved", "settled"):
+                        qs = sig.get("quality_score")
+                        entry["outcome"] = "HIT" if qs and float(qs) > 0 else "MISS"
+                        entry["quality_score"] = qs
+                        entry["resolution_price"] = sig.get("resolution_price")
+                        logger.info("Resolution %s: %s (quality=%s)",
+                                    entry["commitment_hash"][:10], entry["outcome"], qs)
+                    elif status == "defaulted":
+                        entry["outcome"] = "DEFAULT"
+                        logger.info("Resolution %s: DEFAULT", entry["commitment_hash"][:10])
+            except Exception as e:
+                logger.debug("Outcome check failed for %s: %s", entry["commitment_hash"][:10], e)
+
+    def handle_webhook_resolution(self, body: dict) -> dict | None:
+        """Handle a resolution webhook event — instant outcome update."""
+        commitment_hash = body.get("commitment_hash", "")
+        if not commitment_hash:
+            return None
+        for entry in self.purchase_log:
+            if entry.get("commitment_hash") == commitment_hash:
+                if entry.get("outcome"):
+                    return entry
+                status = body.get("status", "")
+                if status in ("resolved", "settled"):
+                    qs = body.get("quality_score")
+                    entry["outcome"] = "HIT" if qs and float(qs) > 0 else "MISS"
+                    entry["quality_score"] = qs
+                    entry["resolution_price"] = body.get("resolution_price")
+                    logger.info("Webhook resolution %s: %s (quality=%s)",
+                                commitment_hash[:10], entry["outcome"], qs)
+                elif status == "defaulted":
+                    entry["outcome"] = "DEFAULT"
+                    logger.info("Webhook resolution %s: DEFAULT", commitment_hash[:10])
+                return entry
+        return None
 
     def get_latest_signals(self) -> dict[str, dict | None]:
         now = time.time()
@@ -611,7 +699,7 @@ class AgdelBuyer:
             if expiry <= now:
                 continue
             duration = expiry - now
-            horizon = _classify_horizon(duration) or sig.get("horizon_bucket")
+            horizon = sig.get("horizon_bucket") or _classify_horizon(duration)
             maker = sig.get("maker_address", sig.get("maker", ""))
             rep = sig.get("maker_track_record") or self._maker_cache.get(maker, {})
             confidence = float(sig.get("confidence", 0) or 0)
@@ -635,6 +723,40 @@ class AgdelBuyer:
             })
         enriched.sort(key=lambda s: s["confCalib"], reverse=True)
         return enriched
+
+    def _update_purchase_log(self, commitment_hash: str, payload: dict):
+        """Update purchase log entry with decrypted delivery fields.
+
+        Only overwrites existing values if the payload value is not None,
+        so API-sourced fields like expiry_time aren't clobbered.
+        """
+        for entry in self.purchase_log:
+            if entry.get("commitment_hash") == commitment_hash:
+                entry["delivered"] = True
+                for key in ("direction", "target_price", "expiry_time", "salt", "asset"):
+                    val = payload.get(key)
+                    if val is not None:
+                        entry[key] = val
+                break
+
+    async def get_signal_detail(self, commitment_hash: str) -> dict:
+        """Fetch full signal detail from AGDEL API and merge with local purchase data."""
+        result = {"local": None, "agdel": None}
+        for entry in self.purchase_log:
+            if entry.get("commitment_hash") == commitment_hash:
+                result["local"] = dict(entry)
+                break
+        if self._mcp_session:
+            try:
+                sig = await self._call_tool("agdel_market_get_signal", {
+                    "commitment_hash": commitment_hash,
+                })
+                if isinstance(sig, str):
+                    sig = json.loads(sig)
+                result["agdel"] = sig
+            except Exception as e:
+                result["agdel_error"] = str(e)
+        return result
 
     def _derive_address_from_key(self) -> str:
         pk = os.environ.get("TRADERBOT_WALLET_PRIVATE_KEY", "") or os.environ.get("AGDEL_PRIVATE_KEY", "")
