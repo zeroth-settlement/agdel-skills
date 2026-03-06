@@ -39,6 +39,17 @@ _HORIZON_RANGES: list[tuple[int, int, str]] = [
     (3000, 5400, "1h"),
 ]
 
+# Minimum seconds remaining before we attempt to buy a signal for each horizon.
+# The AGDEL buying window closes well before expiry — roughly 50% of signal lifetime
+# for short horizons. These thresholds prevent wasting purchase attempts.
+_MIN_REMAINING_SECS: dict[str, int] = {
+    "1m": 30,
+    "5m": 150,
+    "15m": 120,
+    "30m": 120,
+    "1h": 120,
+}
+
 
 @dataclass
 class BudgetTracker:
@@ -374,10 +385,15 @@ class AgdelBuyer:
                     expiry = int(expiry)
                 except ValueError:
                     continue
-            if expiry - now < 60:
+            remaining = expiry - now
+            if remaining < 60:
                 continue
-            horizon = sig.get("horizon_bucket") or _classify_horizon(expiry - now)
+            horizon = sig.get("horizon_bucket") or _classify_horizon(remaining)
             if horizon not in needed:
+                continue
+            # Per-horizon minimum remaining time — buying window closes early
+            min_remaining = _MIN_REMAINING_SECS.get(horizon, 60)
+            if remaining < min_remaining:
                 continue
             confidence = float(sig.get("confidence", 0) or 0)
             if confidence < self.min_confidence:
@@ -399,7 +415,11 @@ class AgdelBuyer:
             type_count = recent_types.get(sig_type, 0)
             diversity_bonus = 0.1 / (1 + type_count)  # diminishes as type is seen more
 
-            rank_score = cc + diversity_bonus
+            # Freshness bonus: prefer signals with more time remaining (0-0.15)
+            # For 5m signals, remaining 150-450s maps to 0-0.15 bonus
+            freshness_bonus = min(0.15, remaining / 3000)
+
+            rank_score = cc + diversity_bonus + freshness_bonus
 
             scored.append((rank_score, {
                 **sig, "horizon": horizon, "cost": cost,
@@ -453,9 +473,12 @@ class AgdelBuyer:
                     expiry = int(expiry)
                 except ValueError:
                     continue
-            if expiry - now < 60:
+            remaining = expiry - now
+            if remaining < 60:
                 continue
-            horizon = sig.get("horizon_bucket") or _classify_horizon(expiry - now)
+            horizon = sig.get("horizon_bucket") or _classify_horizon(remaining)
+            if horizon and remaining < _MIN_REMAINING_SECS.get(horizon, 60):
+                continue
             if horizon not in self.target_horizons:
                 continue
             confidence = float(sig.get("confidence", 0) or 0)
@@ -533,10 +556,14 @@ class AgdelBuyer:
                 return None
         except Exception as e:
             err_str = str(e)
-            # AlreadyPurchased: add to set so we don't retry
+            # Non-retryable errors: mark hash so we don't waste attempts
             if "AlreadyPurchased" in err_str or "3367b554" in err_str:
                 self.purchased_hashes.add(commitment_hash)
                 logger.info("Already purchased %s, skipping", commitment_hash[:12])
+                return None
+            if "buying window closed" in err_str.lower():
+                self.purchased_hashes.add(commitment_hash)
+                logger.info("Buying window closed for %s, skipping", commitment_hash[:12])
                 return None
             self._stats["errors"] += 1
             logger.error("Purchase failed for %s: %s", commitment_hash[:12], e)
