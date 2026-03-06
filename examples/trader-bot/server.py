@@ -171,13 +171,17 @@ async def agdel_poll_loop():
         return
     interval = agdel_buyer.poll_interval
     await asyncio.sleep(5)
+    poll_count = 0
     while True:
         try:
             purchased = await agdel_buyer.poll_once()
             if purchased:
                 logger.info("AGDEL: purchased %d signals", len(purchased))
             await agdel_buyer.check_stale_deliveries()
-            await agdel_buyer.check_outcomes()
+            # Check outcomes less frequently (every ~60s) to keep poll loop fast
+            poll_count += 1
+            if poll_count % 4 == 0:
+                await agdel_buyer.check_outcomes()
         except Exception as e:
             logger.error("AGDEL poll error: %s", e)
         await asyncio.sleep(interval)

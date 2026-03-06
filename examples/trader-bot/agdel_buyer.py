@@ -167,6 +167,7 @@ class AgdelBuyer:
         self._buyer_address: str = ""
         self._pending_deliveries: dict[str, dict] = {}
         self._maker_cache: dict[str, dict] = {}
+        self._usdc_last_refresh: float = 0.0
         self._stats = {
             "polls": 0, "purchases": 0, "deliveries": 0,
             "errors": 0, "lastPollAt": None,
@@ -294,7 +295,10 @@ class AgdelBuyer:
         self._stats["polls"] += 1
         self._stats["lastPollAt"] = time.time()
         purchased = []
-        await self._refresh_usdc_balance()
+        # Refresh USDC balance at most every 60s to avoid adding latency
+        if time.time() - self._usdc_last_refresh > 60:
+            await self._refresh_usdc_balance()
+            self._usdc_last_refresh = time.time()
 
         try:
             for asset in self.assets:
@@ -370,7 +374,7 @@ class AgdelBuyer:
                     expiry = int(expiry)
                 except ValueError:
                     continue
-            if expiry - now < 30:
+            if expiry - now < 60:
                 continue
             horizon = sig.get("horizon_bucket") or _classify_horizon(expiry - now)
             if horizon not in needed:
@@ -449,7 +453,7 @@ class AgdelBuyer:
                     expiry = int(expiry)
                 except ValueError:
                     continue
-            if expiry - now < 30:
+            if expiry - now < 60:
                 continue
             horizon = sig.get("horizon_bucket") or _classify_horizon(expiry - now)
             if horizon not in self.target_horizons:
