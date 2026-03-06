@@ -4,7 +4,7 @@ description: MCP-first workflow for buying signals on the AGDEL prediction marke
 license: Apache-2.0
 metadata:
   author: Pyrana
-  version: 1.2.0
+  version: 1.3.0
   mcp-server: agdel-mcp
   documentation: https://agent-deliberation.net/docs/buyer-guide
 ---
@@ -341,11 +341,33 @@ For automated signal purchasing, use a slot-aware approach that maintains signal
 **Signal ranking — C*C score:**
 - Rank candidates by `confidence * calibration_score` (C*C) — this weights both the maker's stated confidence and their historical calibration accuracy
 - Apply a type diversity bonus: `0.1 / (1 + count_of_type_in_recent_purchases)` — encourages buying from different signal types rather than always picking the highest-rated type
+- Apply a freshness bonus: `min(0.15, remaining_seconds / 3000)` — prefers signals with more time remaining, reducing failed purchase attempts on stale signals
+
+**Buying window timing (critical for 5m signals):**
+
+The AGDEL marketplace closes the buying window well before a signal expires — roughly 50% of the signal's lifetime for short horizons. A fixed minimum buffer (e.g., 60s) is insufficient for 5m signals. Use per-horizon minimum remaining time:
+
+```python
+_MIN_REMAINING_SECS = {
+    "1m": 30,
+    "5m": 150,   # buying window closes ~150s before expiry
+    "15m": 120,
+    "30m": 120,
+    "1h": 120,
+}
+```
+
+Without this, the bot wastes purchase attempts on signals whose buying window has already closed, producing repeated `signal buying window closed` errors. Also mark these failed hashes as attempted so they aren't retried every poll cycle.
 
 **Opportunistic outlier buying:**
 - Maintain a rolling average of C*C scores from recent purchases
 - If a signal's C*C exceeds `rolling_avg * outlier_multiplier` (e.g., 1.25 = 25% above average), buy it regardless of slot status
 - This captures exceptionally strong signals even when all slots are filled
+
+**Poll loop optimization:**
+- Poll interval should be 15s (not 30s) for faster signal discovery — critical for 5m signals
+- Throttle USDC balance refresh to every 60s (not every poll) to reduce latency
+- Run outcome checks every ~60s (not every poll) since they require MCP calls and don't affect buying
 
 **Example config:**
 ```yaml
@@ -353,6 +375,7 @@ agdel:
   autoBuy: true
   autoBuyCooldownSeconds: 180
   outlierCcMultiplier: 1.25
+  pollIntervalSeconds: 15
   selection:
     targetHorizons:
       5m: 1
@@ -482,6 +505,16 @@ if isinstance(resp, dict):
 
 Always enforce a minimum (e.g., $11) client-side. Skip the minimum check for close actions (`market_close` needs no size parameter).
 
+### Reducing Positions
+
+The Hyperliquid Python SDK's `market_open()` does **not** accept a `reduce_only` parameter. Do not pass `reduce_only=True` — it will cause a TypeError. To reduce a position, simply call `market_open` with `is_buy` set to the opposite direction of the position and a size smaller than or equal to the current position size:
+
+```python
+# Reduce a short: buy to close partially
+reduce_size = min(desired_size, abs(pos.size) * 0.5)
+result = exchange.market_open(asset, is_buy=True, sz=reduce_size)
+```
+
 ## Troubleshooting
 
 ### MCP Connection Issues
@@ -516,6 +549,7 @@ Always enforce a minimum (e.g., $11) client-side. Skip the minimum check for clo
 | Purchase returns 400 but button briefly shows "Bought" | The dashboard optimistically updates the button. Check the error in the purchase log or server logs. Common cause: gas or USDC issues above. |
 | `tx_hash is required` | You may be using the published `agdel-mcp` npm package which requires the caller to submit the on-chain tx. Use the local dev MCP server (`npx tsx mcp/server.ts` from the agdel monorepo root with `AGDEL_ONCHAIN=1`) which handles on-chain submission internally. |
 | `AlreadyPurchased` / error selector `0x3367b554` | Signal was already purchased (common after bot restart). Add hash to purchased set and skip. Do not retry. |
+| `signal buying window closed` | Signal is too close to expiry. For auto-buy, use per-horizon minimum remaining time thresholds (5m: 150s, 15m: 120s). Mark the hash as attempted so it isn't retried. |
 
 ### Delivery Issues
 
@@ -535,6 +569,7 @@ Always enforce a minimum (e.g., $11) client-side. Skip the minimum check for clo
 | Order rejected but SDK says "ok" | Parse nested errors: `result["response"]["data"]["statuses"][*]["error"]`. |
 | "Order must have minimum value of $10" | Enforce $11 min notional client-side. Bump size up if equity allows. Skip check for close actions. |
 | Direction is inverted | AGDEL uses `0=long, 1=short`. Verify your mapping in `_convert_signal`. |
+| `reduce_only` TypeError on decrease | `market_open()` doesn't accept `reduce_only`. Just call it with opposite `is_buy` direction and correct size. |
 
 ### Refund Issues
 
